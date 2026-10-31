@@ -1,0 +1,208 @@
+Doom VR - Doom, Doom II, Final Doom, Doom 64, Heretic, Hexen, Strife and
+hundreds of megawads and mods, in PC VR.            (version: see version.txt)
+==========================================================================
+
+A Game Or Die VR port: UZDoom 5.0.1 with a VR mode built in, over OpenXR.
+This download has no games in it. Setup.bat finds the ones you own.
+
+NEEDS
+    Windows 10 or 11 (64-bit), a PC VR headset with an OpenXR runtime
+    (SteamVR, Virtual Desktop or Meta Quest Link), and a graphics card that
+    handles PC VR. Your own copies of the commercial games; the free games
+    and the megawads need nothing.
+
+INSTALL
+    1. Extract the zip anywhere, then double-click Setup.bat in the
+       extracted folder (not from inside the zip).
+    2. Setup makes a VR folder for Doom VR: inside your DOOM + DOOM II folder
+       (Steam or GOG) when you have it, otherwise Documents\Doom VR. Then it:
+         - finds your Doom, Doom II, Final Doom, Master Levels, Doom 64,
+           Heretic + Hexen, Strife and Chex games on Steam and GOG (own one
+           somewhere else? drop its folder onto Setup.bat) and copies them in;
+         - downloads the free games and mods: Freedoom, Blasphemer, the
+           classic megawads, Beautiful Doom, Voxel Doom II, NashGore, Brutal
+           Doom, Project Brutality, DOOM CE, the total conversions and more.
+           The first time that is about 5.5 GB, so allow about 6 minutes on
+           a fast connection and longer on a slow one. Setup says what it is
+           downloading as it goes;
+         - makes Doom 64's IWAD and its Lost Levels from your own DOOM64.WAD,
+           a cover for every game from its own title screen, and a launcher
+           per game.
+       It also offers a desktop shortcut and an entry in your Steam library.
+       Run it again any time: it only adds, and never touches your saves or
+       settings. What it did is in setup-log.txt in the VR folder.
+    3. Start your VR runtime, then the Doom VR shortcut (or Doom VR.cmd in the
+       VR folder). "Doom VR (flat).cmd" plays on the monitor with no headset.
+    Bought another Doom-family game later? Run "Find my new games.cmd" in
+    the VR folder. To remove Doom VR, run Uninstall.bat there: your settings
+    and saved games are kept, and your games themselves are never touched.
+
+    UPDATING keeps your saved games, your settings, your weapon and hand
+    fits and your notes in the Game Tome: run the new version's Setup.bat
+    (or update in the Game Or Die Installer).
+    Settings acting up? "Reset settings.cmd" in the VR folder puts them back
+    to how they came (the old ones are kept beside them); saved games, fits
+    and notes stay.
+
+TESTED ON
+    Meta Quest 3 over Virtual Desktop, on an RTX 3080 Ti and an RTX 5080, at
+    90 frames a second; the Steam Frame through SteamVR. Valve Index, Vive
+    and Windows Mixed Reality controllers are supported but not yet tested
+    by us.
+
+FAQ
+    Is it free? Yes, always.
+    Do I need my own games? For Doom, Doom II, Final Doom, Doom 64, Heretic,
+        Hexen and Strife, yes: Steam or GOG, the classic releases and the
+        re-releases alike. The free games and the megawads need nothing.
+    Which headsets? Any PC VR headset with an OpenXR runtime: Virtual
+        Desktop, Steam Link, Quest Link or Air Link, Index, Vive, Windows
+        Mixed Reality, and the Steam Frame through SteamVR.
+    Standalone on a Quest 3 or the Steam Frame? Not yet.
+    Multiplayer? Single player for now.
+    Are my saves safe? Yes, and updating keeps them (see UPDATING).
+    What PC do I need? One that runs PC VR well. On a weaker PC, set Weapon
+        detail to Standard (VR Options > Hands and Weapons) and play with the
+        Classic style instead of Modern VR.
+    Brutal Doom, Project Brutality, Beautiful Doom, Voxel Doom, DOOM CE?
+        Yes: Setup fetches them and Switch Game has them, our 3D guns
+        included. A mod with its own weapon art shows that art.
+    Left-handed? Seated? Yes: VR Options > Hands and Weapons > Leftorium
+        (left-handed), and recenter seated; Physical Play > Seated reach
+        lifts the holsters.
+    It started on the monitor, not in the headset: start your VR runtime
+        first, then Doom VR. Still flat, or something broke? See IF
+        SOMETHING GOES WRONG below.
+
+PLAYING
+    The Doom VR shortcut opens the game picker on Doom: every game, grouped,
+    with its cover. Pick one and it loads in a second or two without leaving
+    the headset. The same list is Switch Game in the main menu, any time.
+    STYLE: Modern VR adds what fits each game - Voxel Doom, NashGore and its
+    voxel gore, upscaled textures, HD sounds, remastered music. The shortcut
+    always starts in Modern VR. Classic is the game as it was made, for the
+    session: bottom of Switch Game, then Restart this game.
+    BUILD YOUR OWN GAME: a game plus maps, one gameplay mod, looks, sounds
+    and music. What does not fit your picks is gray - highlight it to see why.
+    YOUR OWN ART: put 600 x 900 covers named like the game ('Doom II.png') in
+    the VR folder's game\boxart\, and a 1920 x 1080
+    game\boxart\graphics\vrsplash.png, then run "Find my new games.cmd".
+
+CONTROLS
+    Left stick ........ walk (where you look); hold it in to run
+    Right stick ....... turn; flick up = use item, down = next item
+    Right trigger ..... fire (where your hand points; the red dot shows where
+                        the shot will land); clicks in menus
+    Left trigger ...... alt-fire, or the weapon in your left hand (VR mods)
+    A ................. use / doors                         B ... crouch
+    X ................. reload                              Y ... jump
+    Grips ............. tap: previous / next weapon
+    Right stick, held in  weapon wheel: your guns around your hand, the game
+                        slowed; move your hand to one and let go
+    Both grips held ... recenter (in menus too: it puts the menu back in
+                        front of you)
+    Both palms up ..... hands together, palms up as if holding a book, for a
+                        second: the Game Tome, the game's manual as a book
+                        (also in VR Options); B, Y or Menu closes it
+    Left menu button .. menu
+    In any menu, HOLD the right grip and point your right controller at the
+    screen - a dot shows where - and pull the trigger to click. Let go and the
+    sticks and buttons have the menu; a quick tap of the grip pages down.
+    PHOTO MODE: in the menu, click the LEFT STICK to hide it and look around
+    the frozen world; any other button brings the menu back.
+    To quit: menu, Quit Game, A, A.
+
+VR OPTIONS (first in Options)
+    Recenter, Switch Game, Build Your Own Game and the style, then:
+    Turning and Moving ... snap or smooth turning, walking direction and
+                           speed, head bob, comfort vignette (off to start)
+    Your Body and Room ... eye height; walk around your room; crouch for
+                           real; fade to black when your head is in a wall
+    Hands and Weapons .... THE LEFTORIUM (left-handed: the gun in your left
+                           hand, the left trigger fires; you still walk with
+                           the left stick - "Swap sticks" swaps them); weapon
+                           size; tune the weapon in your hand; red dot on or
+                           off, its size and opacity; vibration and its
+                           strength; your own hands (holding each gun);
+                           weapon detail, Standard or Fine (from the next
+                           game)
+    Physical Play ........ play with your body - see PHYSICAL PLAY below
+    HUD and Menu Screen .. HUD and menu screen size and distance; pointing at
+                           menus; the steady desktop view
+    Seated or standing, recenter the way you will play: wherever your eyes
+    are then becomes Doom's eye height.
+
+PHYSICAL PLAY (VR Options > Physical Play; each part on or off, or all at
+once with "Physical" and "Simple"). The buttons always keep working.
+    Holsters ......... two, on your gun hand's side: the last one-handed
+                       gun you used is on your hip, the last two-handed gun
+                       on top of your shoulder. Reach there and squeeze grip
+                       to draw it; squeeze there again to put it back. Both
+                       guns are drawn on you; a buzz, a ring and the gun's
+                       name show a holster in reach. Every other weapon is
+                       in the weapon wheel. Seated, "Seated reach" lifts them.
+    Swing to strike .. fists, chainsaw, staffs, every melee weapon
+    Two hands ........ long guns: hold the other hand's grip on the gun's
+                       front and aim from hand to hand; "Two-handed aim:
+                       Gun stock" aims from your face through the gun hand,
+                       as along a rifle's stock, with the gun raised
+                       (while you hold a long gun, that grip held never
+                       changes weapon; a quick tap still does)
+    Press by hand .... push switches and doors with either hand
+    Items at mouth ... Heretic, Hexen, Strife: the other hand to your mouth,
+                       grip, and the selected item is used
+    Wrist ............ health, armor and the face on the end of the other
+                       wrist, ammo on the gun hand's (or a watch on the
+                       back of the wrist: VR Options)
+
+STEAM FRAME (and any SteamVR headset)
+    Start SteamVR first, then DoomVR.bat on the PC (or from SteamVR's
+    desktop view in the headset). While SteamVR is running, Doom VR uses it
+    for that game, whatever Windows' VR setting says, and changes nothing
+    on your PC. Started from the Frame's own library, it plays flat.
+    The Frame's buttons follow the official Steam releases' gamepad layouts,
+    with the motion controllers aiming and the triggers firing as usual:
+                     Doom games             Heretic, Hexen, Strife
+      A              use                    jump
+      B              crouch                 run
+      X              reload                 use
+      Y              automap                automap
+      LB / RB        previous / next weapon, in both
+      D-pad          weapons 2 to 5         fly up and down, pick an item
+      Left stick     run (click)            crouch (click)
+      Right stick    zoom (click)           use the item (click)
+      View / Menu    scores / menu, in both
+    On the automap the D-pad pans and LB / RB zoom. Hold both grips to
+    recenter. Each is a key you can rebind (VRF_A, VRF_DPadUp...).
+
+STREAMING AND RECORDING
+    The monitor shows the observer view: steady, following your turns but
+    not every small head movement, with the horizon kept level, and with the
+    menus, messages and status bar over it as you see them. HUD and Menu
+    Screen > Steady desktop view turns the steadying off.
+
+KNOWN ISSUES
+    - Room-scale and crouching for real work in single player only.
+    - Mods made for other VR ports load, but their guns may sit differently
+      in the hand; the weapon tuner fits each one and remembers it.
+
+IF SOMETHING GOES WRONG
+    Run "Collect logs.bat" in the VR folder. It puts the logs, the settings
+    and a short report on this PC into one zip on your desktop: send that
+    with your report. Nothing is uploaded and no game files are copied.
+
+CREDITS
+    UZDoom, and ZDoom and GZDoom before it: the engine, by their teams.
+    id Software (Doom), Raven Software (Heretic, Hexen), Rogue Entertainment
+    (Strife), Midway and Nightdive Studios (Doom 64). The games and mods
+    setup fetches belong to their authors. Most come from their own pages;
+    the ones on sites that block downloads by script come unmodified from
+    Doom VR's mods page on GitHub, which credits and links every author.
+    The Khronos Group for OpenXR.
+
+LICENSE
+    The program is GPL-3.0-or-later, like UZDoom. Game Or Die's own work in
+    it - the Game Tome, the hands and 3D guns, the covers and Setup - is all
+    rights reserved, redistributable only as part of Doom VR.
+    licenses\THIRD-PARTY.txt says what is under which license; licenses.zip
+    has UZDoom's component licenses.

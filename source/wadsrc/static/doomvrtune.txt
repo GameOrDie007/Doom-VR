@@ -1,0 +1,5 @@
+# DoomVR's shipped weapon fits - each weapon's place in the hand, added to the
+# measured placement. Tuned in the headset with vr_tune (doomvr_tune.cpp),
+# which saves doomvr-weapons.txt beside the player's ini; that file is copied
+# here once the fits are settled. A player's own file overrides these.
+# class right up forward (metres) pitch yaw roll (degrees) scale

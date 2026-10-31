@@ -1,0 +1,56 @@
+# build artifacts
+/*build*
+/wadsrc/*.pk3
+.flatpak-builder/
+*.AppImage
+*.flatpak
+flatpak/
+uzdoom-crash.log
+fmodapi*linux/
+gitinfo.h
+wadsrc*/**/language.csv
+wadsrc*/**/language.0
+wadsrc/static/contributors.txt
+wadsrc/static/meta.xml
+
+# editor/tooling/os files
+*~
+.gdb_history
+.DS_Store
+.vs
+.idea
+.vscode
+.cache
+*.kate-swp
+.kate*
+*.geany
+
+# private dev files
+*.user
+*.local
+*.log
+
+# other / unknown
+*.ncb
+*.suo
+*.pdb
+*.ilk
+*.aps
+/wadsrc_wad
+/release_gcc
+/DOOMSTATS.TXT
+/disasm.txt
+/llvm
+/src/gl/unused
+/mapfiles_release/*.map
+.cache/
+
+# DoomVR build trees
+/build-flat/
+/build-vr/
+__pycache__/
+/third-party-download/
+/dist/
+
+# The Game Manual (Game Tome layer + built books): a drop folder the packager reads, never committed
+gametome-drop/

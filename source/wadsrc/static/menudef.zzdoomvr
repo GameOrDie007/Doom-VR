@@ -1,0 +1,245 @@
+/*
+** menudef.zzdoomvr - DoomVR's options.
+**
+** Written for Doom VR. MENUDEF
+** lumps are read in name order and this one adds to menus defined in
+** menudef.txt and menudef.zsimple, so its name must sort after both: "zz",
+** not "zd" - "menudef.zdoomvr" was read before menudef.zsimple, failed to find
+** OptionsMenuSimple, and stopped the game at startup in an error dialog.
+**
+** There is deliberately no switch to turn the headset off from here. A player
+** in a headset who turns it off is left looking at nothing, with the menu on a
+** monitor they cannot see.
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+*/
+
+OptionValue "DoomVRTwoHandAim"
+{
+	0, "Basic (hand to hand)"
+	1, "Gun stock (from the face)"
+}
+
+OptionValue "DoomVRWristPlace"
+{
+	0, "The watch"
+	1, "The wrist's cut"
+	2, "Both"
+}
+
+OptionValue "DoomVRHandsStyle"
+{
+	0, "Classic marine"
+	1, "Slayer armor"
+	2, "Game Or Die"
+}
+
+OptionValue "DoomVRWeaponDetail"
+{
+	0, "Standard"
+	1, "Fine (more detail)"
+}
+
+OptionValue "DoomVRSnapTurn"
+{
+	0, "Smooth"
+	15, "Snap 15 degrees"
+	30, "Snap 30 degrees"
+	45, "Snap 45 degrees"
+	90, "Snap 90 degrees"
+}
+
+OptionValue "DoomVRMoveFollows"
+{
+	0, "Where you look"
+	1, "Where the left controller points"
+}
+
+// The Leftorium - left-handed play, named for Ned Flanders' shop for
+// left-handed people. 10 is the value VR mods read as left-handed.
+OptionValue "DoomVRLeftorium"
+{
+	0, "Off - right-handed"
+	10, "On - left-handed"
+}
+
+OptionValue "DoomVRVignette"
+{
+	0, "Off"
+	1, "Light"
+	2, "Strong"
+}
+
+OptionValue "DoomVRStyle"
+{
+	1, "Modern VR"
+	0, "Classic"
+}
+
+OptionValue "DoomVRHudStyle"
+{
+	10, "Status bar"
+	11, "Fullscreen HUD (corners)"
+	12, "None"
+}
+
+// Filled in by DoomVR_BuildSwitchGameMenu (doomvr_switchgame.cpp) with one row
+// per launcher, after every MENUDEF is parsed.
+OptionMenu "DoomVRSwitchGame" protected
+{
+	Class "DoomVRGameSelectMenu"
+	Title "Switch Game"
+	// The style every game starts in. Modern VR adds the voxels, gore,
+	// sounds, music, textures and our 3D hands and guns; Classic is the game
+	// as it was made. Read when a game starts. Shown below the games
+	// (doomvr_switchgame.cpp moves these rows to the bottom).
+	Option "Style", "vr_style", "DoomVRStyle"
+	Command "Restart this game in that style", "vr_restartgame"
+}
+
+// Filled in by DoomVR_BuildBuildMenu (doomvr_build.cpp) from the catalogue
+// setup writes.
+OptionMenu "DoomVRBuild" protected
+{
+	Class "DoomVRBuildMenu"
+	Title "Build Your Own Game"
+}
+
+// VR Options: a short first page - recenter, the game, the style - and four
+// pages, one per thing a player comes looking for. Every setting lives on
+// exactly one page.
+OptionMenu "DoomVROptions" protected
+{
+	Title "VR Options"
+	Command "Game Tome (the book in your other hand)", "vr_game_manual"
+	StaticText "Or both palms up together for a second, in play too"
+	Command "Recenter (face forward, where you want to be)", "vr_recenter"
+	StaticText "Or hold both grips, anywhere - menus too"
+	StaticText " "
+	Submenu "Switch Game", "DoomVRSwitchGame"
+	Submenu "Build Your Own Game", "DoomVRBuild"
+	Option "Style (Modern VR adds voxels, gore, sounds, music)", "vr_style", "DoomVRStyle"
+	Command "Restart this game in that style", "vr_restartgame"
+	StaticText " "
+	Submenu "Turning and Moving", "DoomVRMoving"
+	Submenu "Your Body and Room", "DoomVRBody"
+	Submenu "Hands and Weapons", "DoomVRHands"
+	Submenu "Physical Play", "DoomVRPhysical"
+	Submenu "HUD and Menu Screen", "DoomVRScreens"
+}
+
+OptionMenu "DoomVRMoving" protected
+{
+	Title "Turning and Moving"
+	Option "Right stick turns", "vr_snap_turn", "DoomVRSnapTurn"
+	Slider "Smooth turn speed (degrees a second)", "vr_turn_speed", 30, 360, 15, 0
+	StaticText " "
+	Option "Left stick walks towards", "vr_move_follows", "DoomVRMoveFollows"
+	Slider "Walking speed (1 = Doom's running speed)", "vr_move_speed", 0.25, 1.0, 0.05, 2
+	StaticText "Hold the left stick in to run"
+	StaticText " "
+	Option "Head bob", "vr_view_bob", "OnOff"
+	Option "Comfort vignette (darkens the edges while you move)", "vr_comfort_vignette", "DoomVRVignette"
+}
+
+OptionMenu "DoomVRBody" protected
+{
+	Title "Your Body and Room"
+	Command "Recenter (face forward, where you want to be)", "vr_recenter"
+	StaticText "Seated or standing: recenter the way you will play -"
+	StaticText "wherever your eyes are then becomes Doom's eye height"
+	Slider "Eye height adjust (meters)", "vr_height_adjust", -0.5, 0.5, 0.05, 2
+	StaticText " "
+	Option "Walk around your room (room-scale)", "vr_room_scale", "OnOff"
+	Option "Crouch when you crouch", "vr_real_crouch", "OnOff"
+	Option "Fade to black when your head is in a wall", "vr_wall_fade", "OnOff"
+}
+
+OptionMenu "DoomVRHands" protected
+{
+	Title "Hands and Weapons"
+	Option "Leftorium (left-handed)", "vr_control_scheme", "DoomVRLeftorium"
+	StaticText "The gun goes in your left hand and the left trigger fires;"
+	StaticText "you still walk with the left stick and turn with the right"
+	Option "Swap sticks", "vr_swap_sticks", "OnOff"
+	StaticText " "
+	Option "Game Or Die hands (Modern style)", "vr_hands", "OnOff"
+	Option "Hands style (Doom and Heretic)", "vr_hands_style", "DoomVRHandsStyle"
+	Option "Weapon detail (from the next game)", "vr_weapon_detail", "DoomVRWeaponDetail"
+	StaticText "Your own hands on the controllers, holding the 3D guns"
+	StaticText " "
+	Option "Red dot crosshair (where your shot will land)", "vr_crosshair", "OnOff"
+	Slider "Red dot size", "vr_crosshair_size", 0.5, 2.0, 0.1, 1
+	Slider "Red dot opacity", "vr_crosshair_alpha", 0.2, 1.0, 0.05, 2
+	Slider "Weapon size in the hand", "vr_weapon_scale", 0.0015, 0.006, 0.00025, 4
+	Option "Weapon bob when walking", "vr_weapon_bob", "OnOff"
+	Option "Instant weapon switch", "vr_instant_switch", "OnOff"
+	Option "Shots start at the gun, not the body", "vr_shots_from_gun", "OnOff"
+	Option "Shots leave the gun (for VR weapon mods)", "vr_shots_from_hand", "OnOff"
+	StaticText " "
+	Option "Weapon wheel (hold the right stick's click)", "vr_weapon_wheel", "OnOff"
+	Slider "Game speed while the wheel is open", "vr_wheel_slowmo", 0.1, 1.0, 0.05, 2, "vr_weapon_wheel"
+	StaticText "Move your gun hand to a gun and let go to take it"
+	StaticText " "
+	Option "Controller vibration (firing, getting hit)", "vr_haptics", "OnOff"
+	Slider "Vibration strength", "vr_haptics_strength", 0.1, 1.0, 0.1, 1
+	StaticText " "
+	Option "Tune the weapon in your hand", "vr_tune", "OnOff"
+	StaticText "While tuning: the right stick moves the weapon,"
+	StaticText "click it for the next mode, click the left stick for the other hand"
+	Command "Put this weapon back to the standard fit", "vr_tune_reset"
+}
+
+OptionMenu "DoomVRPhysical" protected
+{
+	Title "Physical Play"
+	StaticText "Play with your body. The buttons always keep working."
+	StaticText " "
+	Command "Physical: turn everything on", "vr_physical 1"
+	Command "Simple: everything back to the buttons", "vr_physical 0"
+	StaticText " "
+	Option "Swing to strike (fists and melee weapons)", "vr_phys_melee", "OnOff"
+	Slider "How fast a swing strikes (m/s)", "vr_phys_swing_speed", 1.2, 4.0, 0.2, 1
+	Option "Holsters on your body (grip to draw)", "vr_phys_holsters", "OnOff"
+	StaticText "Hip: your one-handed gun. Top of the shoulder:"
+	StaticText "your two-handed gun. Squeeze there again to put it back."
+	Slider "Seated reach (lifts the holsters, m)", "vr_phys_holster_lift", 0.0, 0.2, 0.02, 2
+	Option "Two hands on long guns", "vr_phys_twohand", "OnOff"
+	Option "Two-handed aim", "vr_phys_twohand_stock", "DoomVRTwoHandAim"
+	Option "Press switches by hand, items to your mouth", "vr_phys_use", "OnOff"
+	Option "Health and ammo on your wrist", "vr_phys_wrist", "OnOff"
+	Option "Wrist HUD shows on", "vr_phys_wrist_place", "DoomVRWristPlace", "vr_phys_wrist"
+}
+
+OptionMenu "DoomVRScreens" protected
+{
+	Title "HUD and Menu Screen"
+	Option "HUD style", "screenblocks", "DoomVRHudStyle"
+	Slider "HUD size (meters across)", "vr_hud_width", 0.8, 3.0, 0.1, 1
+	Slider "HUD distance (meters)", "vr_hud_distance", 1.0, 4.0, 0.25, 2
+	Slider "Messages below eye level (degrees)", "vr_hud_text_angle", -20, 40, 1, 0
+	Slider "Status bar below eye level (degrees)", "vr_hud_bar_angle", 0, 50, 1, 0
+	Option "Status bar when you glance down", "vr_hud_glance", "OnOff"
+	Slider "How far down to glance (degrees)", "vr_hud_glance_angle", 10, 50, 1, 0
+	StaticText " "
+	Slider "Menu screen size (meters across)", "vr_panel_width", 1.2, 4.0, 0.1, 1
+	Slider "Menu screen distance (meters)", "vr_panel_distance", 1.0, 4.0, 0.25, 2
+	Option "Point at menus (hold the right grip, trigger clicks)", "vr_menu_pointer", "OnOff"
+	StaticText " "
+	Option "Steady desktop view (for streams)", "vr_spectator", "OnOff"
+	StaticText "The monitor follows your turns, not every wobble, with the horizon level"
+}
+
+// VR Options first, in both the simple and the full Options menu - the thing
+// a headset player opens Options for.
+AddOptionMenu "OptionsMenu" before "os_Menu"
+{
+	Submenu "VR Options", "DoomVROptions"
+	Submenu "Switch Game", "DoomVRSwitchGame"
+}
+
+AddOptionMenu "OptionsMenuSimple" before "os_Menu"
+{
+	Submenu "VR Options", "DoomVROptions"
+	Submenu "Switch Game", "DoomVRSwitchGame"
+}

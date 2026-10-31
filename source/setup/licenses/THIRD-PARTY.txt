@@ -1,0 +1,78 @@
+Doom VR - what is in this folder, and under which licence
+=========================================================
+
+Doom VR itself (uzdoom.exe, uzdoom.pk3 and the other .pk3 files beside it) is
+UZDoom 5.0.1 with a VR mode added, and is licensed GPL-3.0-or-later, like
+UZDoom. The source is at https://github.com/GameOrDie007/Doom-VR.
+
+Game Or Die's own work in this download - the Game Tome (gametome\: the
+layer and its books), Game Or Die Hands (setup\gdh\: the hands, their
+styles, gdh_setup.exe and the 3D gun packs), the covers, splash and
+backdrop (setup\boxart\, setup\*.png) and the Setup scripts (setup\*.ps1,
+the .bat files) - is Copyright (C) 2026 Game Or Die, all rights reserved.
+It may be redistributed only as part of Doom VR, unchanged. It is not
+covered by the GPL: it is not built into uzdoom.exe. The CC0 work it is
+made from is credited below. The Game Or Die name and logo are not licensed
+for any other use.
+
+Built into uzdoom.exe:
+
+  UZDoom 5.0.1 and the libraries it builds with
+      GPL-3.0-or-later; each component's own licence is in licenses.zip,
+      which comes unchanged from UZDoom's 5.0.1 Windows release.
+      abseil and cppdap, two of those libraries, are Apache-2.0: the text
+      is licenses\Apache-2.0.txt.
+  pcvr-xr, Game Or Die's OpenXR layer
+      GPL-3.0-or-later - licenses\pcvr-xr (GPL-3.0).txt. Its source is
+      published with Doom VR's.
+
+Beside uzdoom.exe:
+
+  openxr_loader.dll    the Khronos OpenXR SDK 1.0.25 loader, unchanged.
+                       Apache-2.0, Copyright (c) 2017-2023 The Khronos
+                       Group Inc. - licenses\Apache-2.0.txt.
+                       https://github.com/KhronosGroup/OpenXR-SDK
+  soft_oal.dll         OpenAL Soft, LGPL - from UZDoom's 5.0.1 release,
+                       with its licence in licenses.zip.
+  sndfile.dll          libsndfile, LGPL - as above.
+  soundfonts\, fm_banks\
+                       UZDoom's music banks, from the same release.
+
+In setup\gdh\:
+
+  gdh_setup.exe, hand_r.gdh, hand_l.gdh, hand_ao.tga
+                       Game Or Die Hands - our VR hands and the tool that
+                       fits them to each game at setup. Game Or Die's own
+                       work; the hand models are made from the Godot XR
+                       Tools hands by DigitalN8m4r3 (CC0 1.0, public
+                       domain). The hand skins and held weapons are made by
+                       SETUP.bat on your PC from your own games; none of
+                       that game art is in this folder.
+
+  slayer\, slayer_armor\
+                       The Doom games' hand styles (VR Options > Hands and
+                       Weapons > Hands style): the classic marine's padded
+                       gloves and the Slayer's armored gloves. Game Or Die's
+                       own work on the same CC0 hands; their textures use
+                       three CC0 1.0 (public domain) photo scans: "Human
+                       Face Skin Texture" (Skin 0001) from TextureCan.com,
+                       and Leather 014 and Fabric 045 from ambientCG.com.
+
+  gameordie\
+                       The Game Or Die gloves (Hands style: Game Or Die).
+                       Game Or Die's own work on the same CC0 hands.
+
+  doomvr-weapons-doom-b.pk3
+                       Game Or Die's own Doom guns, copied into mods\ by
+                       SETUP.bat. Our own models and textures, made by
+                       script; the pistol, shotgun and super shotgun are
+                       built on Quaternius's LowPoly guns and the chainsaw
+                       on loafbrr's "Chainsaw", both CC0 1.0 (public
+                       domain) - thank you, Quaternius and loafbrr. No game
+                       art is in it.
+
+Not in this folder:
+
+  No game data. SETUP.bat copies your own games in from Steam, GOG or a
+  folder you point it at, and fetches the free games and mods from where
+  their authors publish them. Each keeps its own licence and credits.
