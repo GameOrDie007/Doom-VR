@@ -12,6 +12,7 @@
 */
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <string>
 #include <vector>
@@ -20,12 +21,16 @@
 #include "cmdlib.h"
 #include "printf.h"
 #include "fs_findfile.h"
+#include "fs_filesystem.h"
 #include "utf8.h"
 #include "c_cvars.h"
 #include "v_font.h"
 #include "m_argv.h"
 #include "gamestate.h"
 #include "doomstat.h"
+#include "doomvr_mywads.h"
+
+bool DoomVR_ModernFits(const char* file, const std::vector<std::string>& tags);	// doomvr_build.cpp
 
 // The game being played, as Switch Game labels it: each launcher sets it, and
 // the page opens on that row (zscript/doomvr/gameselect.zs).
@@ -68,6 +73,139 @@ static std::string LauncherGroup(const std::string& name)
 	}
 	fclose(f);
 	return group;
+}
+
+/*
+	My WADs: the player's own WADs and pk3s, in <install>\My WADs\. Each file
+	is a row of its own in Switch Game and a piece in Build Your Own Game, on
+	the game it was made for:
+	  - in a folder named after a launcher (My WADs\Heretic\x.wad), that one;
+	  - else by its maps: E1M1-style names on Doom, MAP01-style on Doom II
+	    (also a pk3's maps\*.wad); a file with no maps (a gameplay mod) on
+	    Doom II;
+	  - the game's first launcher the install has: the original, then its
+	    2024 re-release, then Freedoom.
+	It plays as that launcher plus -file <the file>, with its own name as the
+	game being played (+vr_current_game) and that game's manual in the Game
+	Tome (+vr_book_game). An IWAD is not a WAD to add: it is left out.
+*/
+CVAR(String, vr_book_game, "", CVAR_NOSAVE)
+
+static FString MyWadsDir() { return progdir + "My WADs/"; }
+
+static bool LauncherExists(const std::string& name)
+{
+	return !name.empty() && FileExists(LaunchersDir() + name.c_str() + ".bat");
+}
+
+// Its maps - "doom1" (ExMy), "doom2" (MAPxx), "" (none) or "iwad" - and what
+// it brings of its own (DoomVRMyWad::tags), from its directory alone.
+static std::string MyWadScan(const std::string& path, std::vector<std::string>& tags)
+{
+	FILE* f = fopen(path.c_str(), "rb");
+	if (f == nullptr) return "";
+	char head[4] = {};
+	const bool iwad = fread(head, 1, 4, f) == 4 && memcmp(head, "IWAD", 4) == 0;
+	fclose(f);
+	if (iwad) return "iwad";
+	auto res = FResourceFile::OpenResourceFile(path.c_str(), true);
+	if (res == nullptr) return "";
+	static const char* const kMonsters[] = {
+		"POSS", "SPOS", "CPOS", "TROO", "SARG", "HEAD", "SKUL", "BOSS", "BOS2", "PAIN", "SKEL", "FATT", "BSPI", "CYBR", "SPID", "VILE", "SSWV", "KEEN",
+		"IMPX", "KNIG", "WZRD", "MUMM", "BEAS", "CLNK", "SNKE", "MNTR", "SRCR", "SOR2",
+		"ETTN", "CENT", "DEMN", "DEM2", "SERP", "WRTH", "BISH", "FDMN", "ICEY", "SORC", "KORX", "DRAG" };
+	static const char* const kWeapons[] = { "PISG", "SHTG", "SHT2", "CHGG", "MISG", "PLSG", "BFGG", "SAWG" };
+	auto isOne = [](const char* n, const char* const* list, size_t count) {
+		for (size_t i = 0; i < count; ++i) if (strnicmp(n, list[i], 4) == 0) return true;
+		return false;
+	};
+	auto tag = [&tags](const char* t) { if (std::find(tags.begin(), tags.end(), t) == tags.end()) tags.push_back(t); };
+	std::string kind;
+	std::vector<std::string> monsters;
+	bool inSprites = false;
+	for (uint32_t i = 0; i < res->EntryCountU(); ++i)
+	{
+		const char* full = res->getName(i);
+		if (full == nullptr) continue;
+		const char* slash = strrchr(full, '/');
+		const char* base = slash ? slash + 1 : full;
+		// A sprite: between a WAD's S_START and S_END, or under a pk3's sprites\.
+		if (!stricmp(full, "S_START") || !stricmp(full, "SS_START")) { inSprites = true; continue; }
+		if (!stricmp(full, "S_END") || !stricmp(full, "SS_END")) { inSprites = false; continue; }
+		const bool sprite = (inSprites && slash == nullptr) || strnicmp(full, "sprites/", 8) == 0;
+		if (sprite && strlen(base) >= 4)
+		{
+			if (isOne(base, kMonsters, countof(kMonsters)) && std::none_of(monsters.begin(), monsters.end(), [&](const std::string& m) { return strnicmp(m.c_str(), base, 4) == 0; }))
+				monsters.push_back(std::string(base, 4));
+			if (isOne(base, kWeapons, countof(kWeapons))) tag("ownweapons");
+		}
+		if (!strnicmp(full, "DECORATE", 8) || !strnicmp(full, "ZSCRIPT", 7) || !strnicmp(full, "DEHACKED", 8)) tag("ownactors");
+		if (!strnicmp(full, "TEXTURE1", 8) || !strnicmp(full, "TEXTURE2", 8) || !strnicmp(full, "TEXTURES", 8) || !stricmp(full, "P_START") || !stricmp(full, "PP_START") || !stricmp(full, "TX_START")
+		    || !strnicmp(full, "patches/", 8) || !strnicmp(full, "flats/", 6) || !strnicmp(full, "textures/", 9)) tag("owntextures");
+		if ((slash == nullptr && (!strnicmp(full, "D_", 2) || !stricmp(full, "MUSINFO"))) || !strnicmp(full, "music/", 6)) tag("ownmusic");
+		if ((slash == nullptr && (!strnicmp(full, "DS", 2) || !stricmp(full, "SNDINFO"))) || !strnicmp(full, "sounds/", 7)) tag("ownsounds");
+		// Its maps: a WAD's map lumps, a pk3's maps\<name>.wad.
+		if (!kind.empty()) continue;
+		const char* n = full;
+		if (strnicmp(n, "maps/", 5) == 0) n += 5;
+		else if (slash != nullptr) continue;
+		if ((n[0] == 'E' || n[0] == 'e') && isdigit((unsigned char)n[1]) && (n[2] == 'M' || n[2] == 'm') && isdigit((unsigned char)n[3]) && (n[4] == 0 || n[4] == '.'))
+			kind = "doom1";
+		else if (strnicmp(n, "MAP", 3) == 0 && isdigit((unsigned char)n[3]) && isdigit((unsigned char)n[4]) && (n[5] == 0 || n[5] == '.'))
+			kind = "doom2";
+	}
+	delete res;
+	if (monsters.size() >= 3) tag("ownmonsters");
+	else if (!monsters.empty()) tag("somemonsters");
+	if (kind.empty() && std::find(tags.begin(), tags.end(), "ownactors") != tags.end()) tag("gameplay");
+	return kind;
+}
+
+std::vector<DoomVRMyWad> DoomVR_MyWads()
+{
+	std::vector<DoomVRMyWad> out;
+	std::vector<FileSys::FileListEntry> found;
+	if (!FileSys::ScanDirectory(found, MyWadsDir().GetChars(), "*", false)) return out;
+	std::sort(found.begin(), found.end(), [](const auto& a, const auto& b) { return stricmp(a.FilePathRel.c_str(), b.FilePathRel.c_str()) < 0; });
+	for (auto& f : found)
+	{
+		if (f.isDirectory) continue;
+		std::string ext = f.FileName.substr(f.FileName.find_last_of('.') == std::string::npos ? f.FileName.size() : f.FileName.find_last_of('.'));
+		for (auto& c : ext) c = char(tolower((unsigned char)c));
+		if (ext != ".wad" && ext != ".pk3" && ext != ".pk7" && ext != ".zip") continue;
+		DoomVRMyWad w;
+		w.path = f.FilePath;
+		const std::string kind = MyWadScan(w.path, w.tags);
+		if (kind == "iwad") { Printf("DoomVR: My WADs: %s is a game's IWAD, not a WAD to add - left out\n", f.FilePathRel.c_str()); continue; }
+		w.maps = !kind.empty();
+		w.kind = kind == "doom1" ? "doom1" : "doom2";
+		// Its folder, when that is a launcher's name.
+		std::string rel = f.FilePathRel;
+		for (auto& c : rel) if (c == '\\') c = '/';
+		const size_t slash = rel.find('/');
+		if (slash != std::string::npos && LauncherExists(rel.substr(0, slash))) w.launcher = rel.substr(0, slash);
+		else
+		{
+			static const char* const kDoom1[] = { "Doom", "Doom (2024 re-release)", "Freedoom Phase 1" };
+			static const char* const kDoom2[] = { "Doom II", "Doom II (2024 re-release)", "Freedoom Phase 2" };
+			for (const char* n : (w.kind == "doom1" ? kDoom1 : kDoom2)) if (LauncherExists(n)) { w.launcher = n; break; }
+		}
+		if (w.launcher.empty()) { Printf("DoomVR: My WADs: no game here to play %s on - left out\n", f.FilePathRel.c_str()); continue; }
+		// Its name, unless a launcher or another of these already has it.
+		std::string label = f.FileName.substr(0, f.FileName.size() - ext.size());
+		std::string tryLabel = label;
+		for (int n = 2; LauncherExists(tryLabel) || std::any_of(out.begin(), out.end(), [&](const DoomVRMyWad& o) { return stricmp(o.label.c_str(), tryLabel.c_str()) == 0; }); ++n)
+			tryLabel = label + " (" + std::to_string(n) + ")";
+		w.label = tryLabel;
+		out.push_back(w);
+	}
+	return out;
+}
+
+static const DoomVRMyWad* FindMyWad(const std::vector<DoomVRMyWad>& all, const char* label)
+{
+	for (auto& w : all) if (stricmp(w.label.c_str(), label) == 0) return &w;
+	return nullptr;
 }
 
 static std::vector<std::string> FindLaunchers()
@@ -241,10 +379,27 @@ void DoomVR_BuildSwitchGameMenu()
 	// last. Each group's rows stay in name order.
 	static const char* const kOrder[] = {
 		"Your builds", "Doom", "Doom II", "Final Doom", "Doom 64 and PlayStation", "Heretic", "Hexen", "Strife",
-		"Megawads", "Gameplay mods", "Total conversions", "Free games",
+		"Megawads", "Gameplay mods", "Total conversions", "Free games", "My WADs",
 	};
 	std::vector<std::pair<std::string, std::string>> rows; // group, name
 	for (auto& n : names) rows.emplace_back(LauncherGroup(n), n);
+	// The player's own (My WADs, above); the folder made the first time, so
+	// there is one to find.
+	if (!DirExists(MyWadsDir().GetChars()))
+	{
+		CreatePath(MyWadsDir().GetChars());
+		if (FILE* f = fopen((MyWadsDir() + "Put your WADs here.txt").GetChars(), "wb"))
+		{
+			fputs("Put your own WAD and pk3 files in this folder. Each one shows up in Doom VR's game picker\r\n"
+			      "under My WADs, and in Build Your Own Game.\r\n\r\n"
+			      "Doom VR plays a WAD with E1M1-style maps on Doom, and anything else on Doom II.\r\n"
+			      "For another game, put the file in a folder named after that game in the picker,\r\n"
+			      "for example \"My WADs\\Heretic\" or \"My WADs\\Final Doom - Plutonia\".\r\n", f);
+			fclose(f);
+		}
+	}
+	const auto mine = DoomVR_MyWads();
+	for (auto& w : mine) rows.emplace_back("My WADs", w.label);
 	auto rank = [](const std::string& g) {
 		for (int i = 0; i < int(countof(kOrder)); ++i) if (g == kOrder[i]) return i;
 		return g == "Other" ? 1000 : 500;
@@ -277,7 +432,15 @@ void DoomVR_BuildSwitchGameMenu()
 		cmd.Format("vr_switchgame \"%s\"", r.second.c_str());
 		desc->mItems.Push(CreateOptionMenuItemCommand(r.second.c_str(), cmd.GetChars(), true));
 	}
-	Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: Switch Game lists %u launchers in %d groups, %s first\n", unsigned(names.size()), groups, first.c_str());
+	// None yet: where to put them, at the end of the list.
+	if (mine.empty())
+	{
+		desc->mItems.Push(CreateOptionMenuItemStaticText(" "));
+		desc->mItems.Push(CreateOptionMenuItemStaticText("My WADs", 1));
+		desc->mItems.Push(CreateOptionMenuItemStaticText("Put your own WADs in the My WADs folder"));
+		desc->mItems.Push(CreateOptionMenuItemStaticText("(in Doom VR's game folder) to see them here."));
+	}
+	Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: Switch Game lists %u launchers in %d groups, %s first; My WADs: %u\n", unsigned(names.size()), groups, first.c_str(), unsigned(mine.size()));
 }
 
 // The game being played again, from its launcher: after changing the style,
@@ -459,7 +622,18 @@ CCMD(vr_switchgame)
 {
 	if (argv.argc() < 2) { Printf("vr_switchgame <launcher name>\n"); return; }
 	FString bat = LaunchersDir() + argv[1] + ".bat";
+	// One of the player's own (My WADs): its game's launcher, and the file.
+	std::vector<DoomVRMyWad> mine;
+	const DoomVRMyWad* my = nullptr;
+	if (!FileExists(bat))
+	{
+		mine = DoomVR_MyWads();
+		my = FindMyWad(mine, argv[1]);
+		if (my != nullptr) bat = LaunchersDir() + my->launcher.c_str() + ".bat";
+	}
 	if (!FileExists(bat)) { Printf("vr_switchgame: no launcher %s\n", bat.GetChars()); return; }
+	// The Game Tome's book: the game's own, unless a My WADs file names another.
+	vr_book_game = "";
 
 	if (argv.argc() < 3 && stricmp(argv[1], *vr_current_game) == 0 && gamestate != GS_STARTUP)
 	{
@@ -475,7 +649,31 @@ CCMD(vr_switchgame)
 		args.Push(Args->GetArg(0));
 		if (const char* cfg = Args->CheckValue(FArg_config)) { args.Push("-config"); args.Push(cfg); }
 		FString shown;
-		for (auto& a : launch) { args.Push(a); shown.AppendFormat(" %s", a.GetChars()); }
+		FString dropped;
+		for (unsigned i = 0; i < launch.Size(); ++i)
+		{
+			// A My WADs file keeps only the Modern add-ons that fit what it brings.
+			if (my != nullptr && launch[i].CompareNoCase("-modern") == 0 && i + 1 < launch.Size() && !DoomVR_ModernFits(launch[i + 1].GetChars(), my->tags))
+			{
+				dropped.AppendFormat(" %s", ExtractFileBase(launch[i + 1].GetChars(), true).GetChars());
+				++i;
+				continue;
+			}
+			args.Push(launch[i]);
+			shown.AppendFormat(" %s", launch[i].GetChars());
+		}
+		if (my != nullptr)
+		{
+			FString brings;
+			for (auto& t : my->tags) brings.AppendFormat(" %s", t.c_str());
+			Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: My WADs: %s on %s; it brings:%s; Modern add-ons left out:%s\n",
+			       my->label.c_str(), my->launcher.c_str(), brings.IsEmpty() ? " nothing of its own" : brings.GetChars(), dropped.IsEmpty() ? " none" : dropped.GetChars());
+			for (const char* a : { "-file", my->path.c_str(), "+vr_current_game", my->label.c_str(), "+vr_book_game", my->launcher.c_str() })
+			{
+				args.Push(a);
+				shown.AppendFormat(" %s", a);
+			}
+		}
 		// Every launcher asks for the headset (+vr_mode 20); a game played on
 		// the monitor stays on the monitor.
 		if (vr_mode != 20) { args.Push("+vr_mode"); args.Push(FStringf("%d", *vr_mode)); }
@@ -503,7 +701,15 @@ CCMD(vr_switchgame)
 	FString dir = progdir;
 	dir.Substitute("/", "\\");
 	FString line;
-	line.Format("cmd.exe /c \"ping -n 4 127.0.0.1 >nul & call \"%s\"\"", winBat.GetChars());
+	// A My WADs file goes on the end, where the launcher's -file %* takes it.
+	FString extra;
+	if (my != nullptr)
+	{
+		FString p = my->path.c_str();
+		p.Substitute("/", "\\");
+		extra.Format(" \"%s\" +vr_current_game \"%s\" +vr_book_game \"%s\"", p.GetChars(), my->label.c_str(), my->launcher.c_str());
+	}
+	line.Format("cmd.exe /c \"ping -n 4 127.0.0.1 >nul & call \"%s\"%s\"", winBat.GetChars(), extra.GetChars());
 	// The successor waits for THIS process to be gone before it starts
 	// (DoomVR_WaitForPredecessor): the few seconds above are not always
 	// enough, and two processes holding the headset and the graphics card at

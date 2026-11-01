@@ -47,6 +47,7 @@
 #endif // !_MSC_VER && !__APPLE__
 
 EXTERN_CVAR (Bool, con_centernotify)
+EXTERN_CVAR (Float, autoaim)
 EXTERN_CVAR (Int, msg0color)
 EXTERN_CVAR (Color, color)
 EXTERN_CVAR (Float, dimamount)
@@ -736,10 +737,14 @@ void FGameConfigFile::DoGameSetup(FString section)
 	const char *value;
 
 	GameLastRunVer = 0;
+	int doomvrLastRun = 0;
 	if (SetSection (section + ".LastRun"))
 	{
 		const char *lastver = GetValueForKey ("Version");
 		if (lastver != NULL) GameLastRunVer = atof(lastver);
+		// DoomVR: its own settings changes, apart from the engine's.
+		const char *dvr = GetValueForKey ("DoomVR");
+		if (dvr != NULL) doomvrLastRun = atoi(dvr);
 	}
 
 	if (SetSection (section + ".UnknownConsoleVariables"))
@@ -777,6 +782,12 @@ void FGameConfigFile::DoGameSetup(FString section)
 	if (SetSection (section + ".Player"))
 	{
 		ReadCVars (0);
+	}
+	// DoomVR 1.0.1: autoaim's old default, 35, saved by 1.0, becomes the new one, 0
+	// (d_netinfo.cpp). A player who chose another value keeps it.
+	if (doomvrLastRun < 1 && autoaim == 35.f)
+	{
+		autoaim = 0.f;
 	}
 
 	if (SetSection (section + ".ConsoleAliases"))
@@ -917,6 +928,7 @@ void FGameConfigFile::ArchiveGameData(FString section)
 	SetSection (section + ".LastRun", true);
 	ClearCurrentSection ();
 	SetValueForKey ("Version", GAMELASTRUNVERSION);
+	SetValueForKey ("DoomVR", "1");
 
 	SetSection (section + ".Player", true);
 	ClearCurrentSection ();

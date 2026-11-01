@@ -51,6 +51,8 @@ supported but not yet tested by us.
   Game in the main menu brings it back any time: pick a game and it loads in a second or two,
   without leaving the headset. Build Your Own Game puts a game together with maps, a gameplay mod,
   looks, sounds and music.
+- **Your own WADs.** Put WAD and pk3 files in the **My WADs** folder (in Doom VR's game folder)
+  and each one shows up in the game picker under My WADs, and in Build Your Own Game.
 - **Modern VR or Classic.** Modern, the default, adds what fits each game: Voxel Doom, NashGore
   with voxel gore, upscaled textures, HD sounds and remastered music. Classic is the game as it was
   made.
@@ -76,6 +78,10 @@ supported but not yet tested by us.
 - **Which headsets?** Any PC VR headset with an OpenXR runtime: Virtual Desktop, Steam Link, Quest
   Link or Air Link, Index, Vive, Windows Mixed Reality, and the Steam Frame through SteamVR.
 - **Standalone on a Quest 3 or the Steam Frame?** Not yet.
+- **Can I add my own WADs?** Yes: put them in `VR\game\My WADs` and pick them at the bottom of the
+  game picker. A WAD with Doom 1 maps plays on Doom, anything else on Doom II; for another game,
+  put it in a folder named after that game in the picker (`My WADs\Heretic`). The Modern looks
+  that would clash with its own monsters or textures are left out for it.
 - **Multiplayer?** Single player for now.
 - **Are my saves safe?** Yes, and updating keeps them.
 - **What PC do I need?** One that runs PC VR well. On a weaker PC, set Weapon detail to Standard

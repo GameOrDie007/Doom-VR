@@ -44,7 +44,9 @@
 
 static FRandom pr_pickteam ("PickRandomTeam");
 
-CVAR (Float,	autoaim,				35.f,		CVAR_USERINFO | CVAR_ARCHIVE);
+// DoomVR: 0, not 35 - in VR the shot goes where the hand points, and autoaim
+// bent it toward monsters (a player's report, 31 Oct 2026). The menu keeps it.
+CVAR (Float,	autoaim,				0.f,		CVAR_USERINFO | CVAR_ARCHIVE);
 CVAR (String,	name,					"Player",	CVAR_USERINFO | CVAR_ARCHIVE);
 CVAR (Color,	color,					0x40cf00,	CVAR_USERINFO | CVAR_ARCHIVE);
 CVAR (Int,		colorset,				0,			CVAR_USERINFO | CVAR_ARCHIVE);

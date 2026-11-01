@@ -46,6 +46,9 @@ EXTERN_CVAR(Float, vr_hunits_per_meter)
 CVAR(Float, vr_debug_yaw, 0.f, 0)
 CVAR(Float, vr_debug_pitch, 0.f, 0)
 CVAR(Float, vr_debug_roll, 0.f, 0)
+// The aim of an Index, Vive or Windows Mixed Reality controller laid along its
+// grip as Quest Touch reports it (Hand(), below). Off = the runtime's own aim.
+CVAR(Bool, vr_aim_from_grip, true, 0)
 // A synthetic tilt of the HEAD, through the layer, so the eye pictures and
 // the views the layer reports with them agree, as a real head's do (the
 // spectator view's check needs that). vr_debug_pitch/roll above turn only the
@@ -418,6 +421,7 @@ namespace
 }
 
 EXTERN_CVAR(String, vr_current_game)
+EXTERN_CVAR(String, vr_book_game)	// a My WADs file: its game, for the book (doomvr_switchgame.cpp)
 extern int paused;
 
 namespace
@@ -554,7 +558,7 @@ namespace
 		const int hand = Leftorium() ? 0 : 1;
 		if (!s->showing && (hand != gToldHand || gToldGame.Compare(*vr_current_game) != 0))
 		{
-			const FString dir = BookFor(*vr_current_game);
+			const FString dir = BookFor(strlen(*vr_book_game) ? *vr_book_game : *vr_current_game);
 			snprintf(s->tomeDir, sizeof(s->tomeDir), "%s", dir.GetChars());
 			s->mainHand = hand;
 			s->floating = 0;
@@ -856,6 +860,41 @@ namespace
 		return r;
 	}
 
+	/*
+		A hand, with its aim where Quest Touch puts it. Every fit in the game -
+		the guns in the hand, the hands on the guns, the muzzles, the red dot -
+		was measured on Touch, where the grip sits in the aim's frame pitched up
+		60 degrees, 3 cm down and 9.5 cm back (VDXR and SteamVR alike). An Index
+		reports 55.3 degrees with 5 degrees of yaw and roll and the grip 2.5 cm
+		lower (a player's log, 31 Oct 2026), so the gun sat off in the hand and
+		the shots left it at an angle. On the controllers we have not measured
+		this way, the aim is laid along their grip as Touch would report it:
+		the hand, where the player feels the controller, stays the runtime's.
+		Touch, the Frame and anything unrecognised keep their own aim.
+	*/
+	bool AimFromGrip(const char* profile)
+	{
+		if (!vr_aim_from_grip || profile == nullptr) return false;
+		return strcmp(profile, "/interaction_profiles/valve/index_controller") == 0
+		    || strcmp(profile, "/interaction_profiles/htc/vive_controller") == 0
+		    || strcmp(profile, "/interaction_profiles/microsoft/motion_controller") == 0;
+	}
+
+	pcvrxr::HandState Hand(pcvrxr::Hand which)
+	{
+		pcvrxr::HandState h = gSession->GetHand(which);
+		if (h.active && AimFromGrip(gSession->InteractionProfile(which)))
+		{
+			// Touch: grip = aim x Rx(+60), at (0, -0.03, 0.095) in the aim's frame.
+			const double half = 60.0 * 0.5 * 3.14159265358979323846 / 180.0;
+			const pcvrxr::Quat undo{ float(-sin(half)), 0, 0, float(cos(half)) };
+			h.aim.orientation = QuatMul(h.grip.orientation, undo);
+			const pcvrxr::Vec3 t = Rotate(h.aim.orientation, 0, -0.03, 0.095);
+			h.aim.position = { h.grip.position.x - t.x, h.grip.position.y - t.y, h.grip.position.z - t.z };
+		}
+		return h;
+	}
+
 	// Heretic and Hexen's inventory lives on a pad's D-pad, which Touch does
 	// not have. A flick of the right stick up or down sends it instead: up is
 	// the pad's D-pad down (invuse by default - use the selected item), down
@@ -1105,7 +1144,7 @@ namespace
 	bool WheelOpen()
 	{
 		if (!gSession) return false;
-		const pcvrxr::HandState& r = gSession->GetHand(pcvrxr::Hand::Right);
+		const pcvrxr::HandState& r = Hand(pcvrxr::Hand::Right);
 		if (!r.active) return false;
 		gWheelCount = DoomVR_WheelGather();
 		if (gWheelCount <= 0) return false;
@@ -1129,7 +1168,7 @@ namespace
 	void WheelPick()
 	{
 		if (vr_wheel_debug >= 2) { gWheelHighlight = (vr_wheel_debug - 2) % std::max(1, gWheelCount); return; }
-		const pcvrxr::HandState& r = gSession->GetHand(pcvrxr::Hand::Right);
+		const pcvrxr::HandState& r = Hand(pcvrxr::Hand::Right);
 		if (!r.active) return;
 		const double dx = r.aim.position.x - gWheelCentre.x, dy = r.aim.position.y - gWheelCentre.y, dz = r.aim.position.z - gWheelCentre.z;
 		const double x = dx * gWheelAcross.x + dz * gWheelAcross.z, y = dy;
@@ -1500,8 +1539,8 @@ namespace
 		if (!gBindsChecked) { gBindsChecked = true; VRDefaultBinds(); FrameDefaultBinds(); }
 		gSession->SetSwapHands(Leftorium());
 		TomeKeep(Tome());
-		pcvrxr::HandState l = gSession->GetHand(pcvrxr::Hand::Left);
-		pcvrxr::HandState r = gSession->GetHand(pcvrxr::Hand::Right);
+		pcvrxr::HandState l = Hand(pcvrxr::Hand::Left);
+		pcvrxr::HandState r = Hand(pcvrxr::Hand::Right);
 		{
 			const bool pad = (l.active && l.padLayout) || (r.active && r.padLayout);
 			if (pad != gPadLayout)
@@ -2045,7 +2084,7 @@ void DoomVR_BeginFrame()
 	gMoveYaw = (yaw - gOriginYaw) * kToDeg;
 	gLookYaw = gMoveYaw;
 	{
-		const pcvrxr::HandState& right = gSession->GetHand(pcvrxr::Hand::Right);
+		const pcvrxr::HandState& right = Hand(pcvrxr::Hand::Right);
 		gAimValid = right.active;
 		if (gAimValid)
 		{
@@ -2056,7 +2095,7 @@ void DoomVR_BeginFrame()
 		}
 	}
 	{
-		const pcvrxr::HandState& right = gSession->GetHand(pcvrxr::Hand::Right);
+		const pcvrxr::HandState& right = Hand(pcvrxr::Hand::Right);
 		gGripValid = right.active;
 		if (gGripValid)
 		{
@@ -2064,18 +2103,27 @@ void DoomVR_BeginFrame()
 			gAimPose = right.aim;
 		}
 	}
-	const pcvrxr::HandState& left = gSession->GetHand(pcvrxr::Hand::Left);
+	const pcvrxr::HandState& left = Hand(pcvrxr::Hand::Left);
 	gLeftValid = left.active;
 	if (gLeftValid) { gLeftAimPose = left.aim; gLeftGrip = left.grip; }
 	// Once a run per hand: where this runtime puts the grip pose in the aim
 	// pose's frame. Our hand hangs on the grip and the gun on the aim, so this
 	// is what their meeting depends on (the hands project's
-	// doom_held_preview.py --aim-to-grip takes these numbers).
+	// doom_held_preview.py --aim-to-grip takes these numbers). The runtime's own
+	// numbers, before Hand() lays an unmeasured controller's aim along its grip.
 	{
-		static bool logged[2];
-		const pcvrxr::HandState* hs[2] = { &gSession->GetHand(pcvrxr::Hand::Right), &left };
+		static bool logged[2], laid[2];
+		const pcvrxr::Hand which[2] = { pcvrxr::Hand::Right, pcvrxr::Hand::Left };
+		const pcvrxr::HandState* hs[2] = { &gSession->GetHand(which[0]), &gSession->GetHand(which[1]) };
 		for (int i = 0; i < 2; ++i)
 		{
+			if (!laid[i] && hs[i]->active && AimFromGrip(gSession->InteractionProfile(which[i])))
+			{
+				Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: %s on %s: its aim laid along its grip as Quest Touch reports it (vr_aim_from_grip)\n",
+				       i == 0 ? "weapon hand" : "other hand", gSession->InteractionProfile(which[i]));
+				laid[i] = true;
+				logged[i] = false;	// and its own numbers again, now the profile is known
+			}
 			if (logged[i] || !hs[i]->active) continue;
 			const pcvrxr::Quat& qa = hs[i]->aim.orientation;
 			const pcvrxr::Quat qi{ -qa.x, -qa.y, -qa.z, qa.w };
@@ -2371,7 +2419,7 @@ namespace
 		const double now = NowMs();
 		for (int i = 0; i < 2; ++i)
 		{
-			const pcvrxr::HandState& h = gSession->GetHand(i == 0 ? pcvrxr::Hand::Right : pcvrxr::Hand::Left);
+			const pcvrxr::HandState& h = Hand(i == 0 ? pcvrxr::Hand::Right : pcvrxr::Hand::Left);
 			if (!h.active) { gLastHandAt[i] = -1; gSpeeds[i].clear(); continue; }
 			double v = 0;
 			const pcvrxr::Vec3 p = h.aim.position;
@@ -2495,7 +2543,7 @@ namespace { pcvrxr::Vec3 GunGrip(bool physicalLeft, const DoomVR_WeaponTune& t);
 
 void DoomVR_TwoHands()
 {
-	const pcvrxr::HandState& other = gSession->GetHand(pcvrxr::Hand::Left);
+	const pcvrxr::HandState& other = Hand(pcvrxr::Hand::Left);
 	const bool gripDown = other.active && other.squeezeClick.down;
 	const bool pressed = gripDown && !gTwoHandGripWas;
 	gTwoHandGripWas = gripDown;
@@ -2888,7 +2936,7 @@ CVAR(Float, vr_weapon_tilt, -30.f, 0)
 bool DoomVR_HandPointPose(int hand, const double p[3], double& right, double& up, double& forward)
 {
 	if (!DoomVR_Active() || !gCentered) return false;
-	const pcvrxr::HandState& h = gSession->GetHand(hand == 0 ? pcvrxr::Hand::Right : pcvrxr::Hand::Left);
+	const pcvrxr::HandState& h = Hand(hand == 0 ? pcvrxr::Hand::Right : pcvrxr::Hand::Left);
 	if (!h.active) return false;
 	const pcvrxr::Vec3 o = Rotate(h.aim.orientation, p[0], p[1], p[2]);
 	FromOrigin({ h.aim.position.x + o.x, h.aim.position.y + o.y, h.aim.position.z + o.z }, right, up, forward);
@@ -2900,7 +2948,7 @@ bool DoomVR_HandPointPose(int hand, const double p[3], double& right, double& up
 bool DoomVR_HandPose(int hand, double& right, double& up, double& forward, double& yawDeg, double& pitchDeg, double& rollDeg)
 {
 	if (!DoomVR_Active() || !gCentered) return false;
-	const pcvrxr::HandState& h = gSession->GetHand(hand == 0 ? pcvrxr::Hand::Right : pcvrxr::Hand::Left);
+	const pcvrxr::HandState& h = Hand(hand == 0 ? pcvrxr::Hand::Right : pcvrxr::Hand::Left);
 	if (!h.active) return false;
 	FromOrigin(h.aim.position, right, up, forward);
 	// The body has carried part of the walk (room-scale): the hand is that
@@ -3006,7 +3054,7 @@ bool DoomVR_SetHolsterModel(int i)
 CCMD(vr_debug_holsters)
 {
 	if (!gHolstersValid) { Printf("vr_debug_holsters: holsters not in use this frame\n"); return; }
-	const pcvrxr::HandState& r = gSession->GetHand(Leftorium() ? pcvrxr::Hand::Left : pcvrxr::Hand::Right);
+	const pcvrxr::HandState& r = Hand(Leftorium() ? pcvrxr::Hand::Left : pcvrxr::Hand::Right);
 	const double lift = std::clamp(double(vr_phys_holster_lift), 0.0, 0.20);
 	for (int i = 0; i < kHolsterCount; ++i)
 	{
@@ -3026,7 +3074,7 @@ bool DoomVR_HandsMatrix(int hand, float out[16], DoomVR_HandInput& in, int mode,
 	if (!(weaponHand ? gGripValid : gLeftValid)) return false;
 	const pcvrxr::Pose& grip = weaponHand ? gGrip : gLeftGrip;
 	const pcvrxr::Pose& aim = weaponHand ? gAimPose : gLeftAimPose;
-	const pcvrxr::HandState& h = gSession->GetHand(weaponHand ? pcvrxr::Hand::Right : pcvrxr::Hand::Left);
+	const pcvrxr::HandState& h = Hand(weaponHand ? pcvrxr::Hand::Right : pcvrxr::Hand::Left);
 	in.trigger = h.trigger;
 	in.grip = h.squeeze;
 	in.physicalLeft = (hand == 1) != Leftorium();
@@ -3246,7 +3294,7 @@ CCMD(vr_game_manual)
 		C_MidPrint(nullptr, "The Game Tome needs the headset and Doom VR's book (gametome) beside the game.", false);
 		return;
 	}
-	const FString dir = BookFor(*vr_current_game);
+	const FString dir = BookFor(strlen(*vr_book_game) ? *vr_book_game : *vr_current_game);
 	snprintf(s->tomeDir, sizeof(s->tomeDir), "%s", dir.GetChars());
 	s->mainHand = Leftorium() ? 0 : 1;
 	s->floating = 0;
@@ -3656,7 +3704,7 @@ CCMD(vr_report)
 	gWaitMs = gEyeMs = gSubmitMs = 0;
 	for (int hand = 0; hand < 2; ++hand)
 	{
-		const pcvrxr::HandState& h = gSession->GetHand(pcvrxr::Hand(hand));
+		const pcvrxr::HandState& h = Hand(pcvrxr::Hand(hand));
 		Printf("vr_report: %s hand %s, %s\n", hand ? "right" : "left",
 		       h.active ? "active" : "not active", gSession->InteractionProfile(pcvrxr::Hand(hand)));
 	}

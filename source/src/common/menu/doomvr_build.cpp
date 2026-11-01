@@ -26,6 +26,7 @@
 #include "printf.h"
 #include "vm.h"
 #include "types.h"
+#include "doomvr_mywads.h"
 
 // The picks, saved between sessions: the ids of the chosen pieces.
 CVAR(String, vr_build, "", CVAR_ARCHIVE)
@@ -117,6 +118,29 @@ bool Load()
 		p.kind = c[0]; p.id = c[1]; p.label = c[2];
 		p.has = Tags(c[3]); p.needs = Tags(c[4]); p.clashes = Tags(c[5]); p.warns = Tags(c[6]);
 		p.args = c[7];
+		gPieces.push_back(p);
+	}
+	// The player's own (My WADs), on the rules a megawad and a gameplay mod
+	// have in the catalogue: maps need their game and take the place of its
+	// maps; a file without maps is a gameplay mod.
+	int mine = 0;
+	for (auto& w : DoomVR_MyWads())
+	{
+		Piece p;
+		p.id = "mywads-" + std::to_string(++mine);
+		p.label = w.label + " (My WADs)";
+		const std::string game = strnicmp(w.launcher.c_str(), "Heretic", 7) == 0 ? "heretic"
+		                       : strnicmp(w.launcher.c_str(), "Hexen", 5) == 0 ? "hexen" : "";
+		if (strnicmp(w.launcher.c_str(), "Strife", 6) == 0) continue;	// not a game to build on
+		p.kind = w.maps ? "maps" : "gameplay";
+		p.has = w.tags;
+		p.has.push_back(w.maps ? "maps" : "gameplay");
+		p.needs = { !game.empty() ? game : w.maps ? w.kind : std::string("doom") };
+		if (w.maps) p.clashes = { "hasmaps" };
+		else if (game.empty()) p.clashes = { "ownmonsters", "ownactors" };
+		std::string path = w.path;
+		for (auto& c : path) if (c == '/') c = '\\';
+		p.args = "-file \"" + path + "\"";
 		gPieces.push_back(p);
 	}
 	return !gPieces.empty() && !gTemplate.empty();
@@ -373,6 +397,30 @@ void Refresh(const std::string& pickedAction = "", const std::string& note = "")
 }
 
 } // namespace
+
+// Whether one of a launcher's Modern add-ons (its file) still fits a game a
+// My WADs file joins: not when the catalogue says the add-on clashes with, or
+// only mostly works with, something the file brings - the rule setup's
+// ModernFor applies to a megawad. An add-on the catalogue does not name stays.
+bool DoomVR_ModernFits(const char* file, const std::vector<std::string>& tags)
+{
+	if (gPieces.empty()) Load();
+	const char* slash = strrchr(file, '\\');
+	if (const char* s2 = strrchr(file, '/'); s2 && (!slash || s2 > slash)) slash = s2;
+	std::string name = slash ? slash + 1 : file;
+	for (auto& c : name) c = char(tolower((unsigned char)c));
+	for (auto& p : gPieces)
+	{
+		if (p.kind == "base" || p.id.rfind("mywads-", 0) == 0) continue;
+		std::string args = p.args;
+		for (auto& c : args) c = char(tolower((unsigned char)c));
+		if (args.find("\\" + name + "\"") == std::string::npos && args.find("/" + name + "\"") == std::string::npos) continue;
+		for (auto& t : tags)
+			if (std::find(p.clashes.begin(), p.clashes.end(), t) != p.clashes.end() || std::find(p.warns.begin(), p.warns.end(), t) != p.warns.end())
+				return false;
+	}
+	return true;
+}
 
 // Called from DoomVR_BuildSwitchGameMenu, after every MENUDEF is parsed.
 void DoomVR_BuildBuildMenu()
