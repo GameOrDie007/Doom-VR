@@ -196,4 +196,9 @@ void  checkBenchActive()
 {
 	FStat *stat = FStat::FindStat("rendertimes");
 	glcycle_t::active = ((stat != NULL && stat->isActive()) || printstats);
+#ifdef __ANDROID__
+	// DoomVR: a standalone headset's performance line (doomvr_headset.cpp)
+	// reads these clocks every frame; they cost a clock read each.
+	glcycle_t::active = true;
+#endif
 }

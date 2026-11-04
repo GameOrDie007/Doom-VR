@@ -1,0 +1,8 @@
+# built or machine-local
+app/libs/
+app/build/
+build/
+.gradle/
+local.properties
+# the engine's own files, copied in from the build by tools/build-quest.ps1
+app/src/main/assets/engine/

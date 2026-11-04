@@ -48,6 +48,10 @@
 #include "flatvertices.h"
 #include "hw_cvars.h"
 #include "doomvr_headset.h"
+#ifdef __ANDROID__
+void DoomVR_GpuTimerBegin();	// gles_gputimer_android.cpp
+void DoomVR_GpuTimerEnd();
+#endif
 
 EXTERN_CVAR (Bool, vid_vsync)
 EXTERN_CVAR(Int, gl_tonemap)
@@ -84,6 +88,9 @@ OpenGLFrameBuffer::OpenGLFrameBuffer(void *hMonitor, bool fullscreen) :
 
 OpenGLFrameBuffer::~OpenGLFrameBuffer()
 {
+	// DoomVR: the headset session goes while its GL context is still here.
+	DoomVR_Shutdown();
+
 	PPResource::ResetAll();
 
 	if (mVertexData != nullptr) delete mVertexData;
@@ -233,8 +240,22 @@ void OpenGLFrameBuffer::Swap()
 
 	mVertexData->DropSync();
 
-	FPSLimit();
+	// DoomVR: with a headset, xrWaitFrame paces the game. A limiter pacing it
+	// again beats against the runtime's rate and drops frames.
+	if (!DoomVR_Active()) FPSLimit();
+#ifdef __ANDROID__
+	// A standalone headset: the eyes went to the runtime at EndFrame, and the
+	// app's own Android window is not on any screen while the session runs.
+	// Swapping it anyway queued a frame to the system's compositor at ITS
+	// rate - a second vsync under the runtime's, which at 90 Hz would hold
+	// the game to 72 or 60. The window is swapped only with no headset (the
+	// desk emulator), and the GPU timer closes the frame here.
+	::DoomVR_GpuTimerEnd();
+	if (DoomVR_Active()) glFlush();
+	else SwapBuffers();
+#else
 	SwapBuffers();
+#endif
 
 	mVertexData->NextPipelineBuffer();
 	mVertexData->WaitSync();
@@ -253,6 +274,10 @@ void OpenGLFrameBuffer::Swap()
 
 void OpenGLFrameBuffer::SetVSync(bool vsync)
 {
+	// DoomVR: the window is only a mirror while a headset is up, and its
+	// vsync would hold every frame to the screen's refresh. vid_vsync keeps
+	// its value and applies again when the headset is off.
+	if (DoomVR_Active()) vsync = false;
 	Super::SetVSync(vsync);
 }
 
@@ -333,6 +358,11 @@ void OpenGLFrameBuffer::FirstEye()
 void OpenGLFrameBuffer::NextEye(int eyecount)
 {
 	//GLRenderer->mBuffers->NextEye(eyecount);
+
+	// DoomVR: this renderer has one scene buffer, not one per eye, so the
+	// first eye is handed to the headset as soon as it is finished, before
+	// the second eye is drawn over it. The second goes at Flush.
+	if (eyecount == 2 && DoomVR_Active() && GLRenderer != nullptr) GLRenderer->PresentHeadsetEye(0);
 }
 
 void OpenGLFrameBuffer::SetSceneRenderTarget(bool useSSAO)
@@ -358,11 +388,26 @@ void OpenGLFrameBuffer::WaitForCommands(bool finish)
 
 void OpenGLFrameBuffer::BeginFrame()
 {
-	DoomVR_UnsupportedBackend("OpenGL ES");
+	// DoomVR: first, so the headset is up and the frame paced before the
+	// viewports are sized from it.
+	DoomVR_BeginFrame();
+
+	// And when the headset comes up or goes away, the window's vsync follows.
+	static bool vrVsyncOff = false;
+	if (DoomVR_Active() != vrVsyncOff)
+	{
+		vrVsyncOff = DoomVR_Active();
+		SetVSync(vid_vsync);
+	}
+
 	SetViewportRects(nullptr);
 	mViewpoints->Clear();
 	if (GLRenderer != nullptr)
 		GLRenderer->BeginFrame();
+#ifdef __ANDROID__
+	// The GPU's time for this frame, for the headset's performance line.
+	if (DoomVR_Active()) ::DoomVR_GpuTimerBegin();
+#endif
 }
 
 //===========================================================================

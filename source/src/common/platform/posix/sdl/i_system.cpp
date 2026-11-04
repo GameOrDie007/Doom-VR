@@ -240,6 +240,10 @@ void RedrawProgressBar(int CurPos, int MaxPos)
 	ProgressBarMaxPos = MaxPos;
 }
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
+
 void I_PrintStr(const char *cp)
 {
 	g_AllPrintOutput.Push(cp);
@@ -297,6 +301,11 @@ void I_PrintStr(const char *cp)
 	}
 
 	if (StartWindow) CleanProgressBar();
+#ifdef __ANDROID__
+	// DoomVR: an Android app has no stdout anyone can read; the same line to
+	// logcat (adb logcat -s DoomVR), the colour codes already stripped.
+	__android_log_write(ANDROID_LOG_INFO, "DoomVR", printData.GetChars());
+#endif
 	fputs(printData.GetChars(),stdout);
 	if (terminal) fputs("\033[0m",stdout);
 	if (StartWindow) RedrawProgressBar(ProgressBarCurPos,ProgressBarMaxPos);

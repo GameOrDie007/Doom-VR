@@ -102,7 +102,9 @@ else()
 
 	# Non-Windows version also needs SDL except native OS X backend
 	if( NOT APPLE OR NOT OSX_COCOA_BACKEND )
-		find_package( SDL2 REQUIRED )
+		if( NOT ANDROID )
+			find_package( SDL2 REQUIRED )
+		endif()	# Android: SDL2_INCLUDE_DIR and SDL2_LIBRARY name the build's own SDL2 (platform/quest)
 		include_directories( SYSTEM "${SDL2_INCLUDE_DIR}" )
 		link_directories(${SDL2_LINK_DIR})
 		set( PROJECT_LIBRARIES ${PROJECT_LIBRARIES} "${SDL2_LIBRARY}" )
@@ -343,6 +345,8 @@ if( VPX_FOUND )
 	include_directories( SYSTEM "${VPX_INCLUDE_DIR}" )
 	set( PROJECT_LIBRARIES ${PROJECT_LIBRARIES} ${VPX_LIBRARIES} )
 else()
+	# DoomVR: the standalone headsets build libvpx too (tools\build-quest-vpx.ps1), so the
+	# video cutscenes play there as on the PC.
 	message( SEND_ERROR "Could not find libvpx" )
 endif()
 
@@ -1284,7 +1288,13 @@ set( GAME_SOURCES
 set( GAME_NONPCH_SOURCES ${GAME_SOURCES} )
 list( REMOVE_ITEM GAME_NONPCH_SOURCES ${PCH_SOURCES} )
 
+if( ANDROID )
+	# DoomVR: on Android the game is a shared library SDL's activity loads
+	# (libmain.so); its main() is the entry SDL calls.
+	add_library( zdoom SHARED ${GAME_SOURCES} )
+else()
 add_executable( zdoom MACOSX_BUNDLE ${GAME_SOURCES} )
+endif()
 
 target_include_directories( zdoom PRIVATE ${CMAKE_BINARY_DIR} )
 
@@ -1339,7 +1349,22 @@ target_link_libraries( zdoom ${PROJECT_LIBRARIES} lzma ${ZMUSIC_LIBRARIES} absl:
 # (x64, static CRT, into build-x64-mt). Off, this is stock UZDoom.
 option( DOOMVR_PCVRXR "Build the headset support (needs pcvr-xr)" OFF )
 set( PCVRXR_DIR "" CACHE PATH "pcvr-xr checkout" )
-if( DOOMVR_PCVRXR )
+if( DOOMVR_PCVRXR AND ANDROID )
+	# The standalone headsets: pcvr-xr built for this ABI with the NDK
+	# (tools/build-quest.ps1), and the Khronos OpenXR loader for Android,
+	# which the APK carries as libopenxr_loader.so.
+	set( PCVRXR_ANDROID_LIB "" CACHE FILEPATH "libpcvrxr.a built for this ABI" )
+	set( PCVRXR_ANDROID_LOADER "" CACHE FILEPATH "libopenxr_loader.so for this ABI" )
+	if( NOT EXISTS "${PCVRXR_ANDROID_LIB}" OR NOT EXISTS "${PCVRXR_ANDROID_LOADER}" )
+		message( FATAL_ERROR "DoomVR: PCVRXR_ANDROID_LIB and PCVRXR_ANDROID_LOADER must name pcvr-xr's library and the OpenXR loader for ${ANDROID_ABI}" )
+	endif()
+	add_library( doomvr_openxr_loader SHARED IMPORTED )
+	set_target_properties( doomvr_openxr_loader PROPERTIES IMPORTED_LOCATION "${PCVRXR_ANDROID_LOADER}" )
+	target_compile_definitions( zdoom PRIVATE DOOMVR_PCVRXR )
+	target_include_directories( zdoom PRIVATE "${PCVRXR_DIR}/include" )
+	target_link_libraries( zdoom "${PCVRXR_ANDROID_LIB}" doomvr_openxr_loader EGL GLESv3 )
+	message( STATUS "DoomVR: headset support ON (Android ${ANDROID_ABI}), pcvr-xr at ${PCVRXR_DIR}" )
+elseif( DOOMVR_PCVRXR )
 	set( PCVRXR_LIB "${PCVRXR_DIR}/build-x64-mt/Release/pcvrxr.lib" )
 	set( PCVRXR_LOADER "${PCVRXR_DIR}/extern/openxr" )
 	if( NOT EXISTS "${PCVRXR_LIB}" )
@@ -1423,6 +1448,12 @@ include_directories(
 
 set_target_properties( zdoom PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${ZDOOM_OUTPUT_DIR} )
 set_target_properties( zdoom PROPERTIES OUTPUT_NAME ${ZDOOM_EXE_NAME} )
+if( ANDROID )
+	set_target_properties( zdoom PROPERTIES OUTPUT_NAME main LIBRARY_OUTPUT_DIRECTORY ${ZDOOM_OUTPUT_DIR} )
+	target_link_libraries( zdoom log android )
+	# The GPU frame timer for the headset's performance line (OpenGL ES 3 straight from the system).
+	target_sources( zdoom PRIVATE common/rendering/gles/gles_gputimer_android.cpp )
+endif()
 
 if(NOT MINGW AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 	set_target_properties(zdoom PROPERTIES LINK_FLAGS "-z nostart-stop-gc")
@@ -1453,8 +1484,8 @@ if( MSVC )
 
 endif()
 
-if (WIN32)
-	# nothing
+if (WIN32 OR ANDROID)
+	# nothing (Android: the library goes into an APK, with no link and no rpath)
 elseif (APPLE)
 	IF ("${INSTALL_RPATH}" STREQUAL "")
 		set_target_properties(zdoom PROPERTIES MACOSX_RPATH TRUE)
@@ -1497,7 +1528,7 @@ if ( NOT ZMUSIC_SYSTEM_INSTALL AND (NOT DEFINED BUILD_SHARED_LIBS OR BUILD_SHARE
 	add_custom_command(TARGET zdoom POST_BUILD
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different
 			$<TARGET_FILE:zmusic> $<TARGET_FILE_DIR:zdoom>)
-	if ( NOT WIN32 )
+	if ( NOT WIN32 AND NOT ANDROID )
 		add_custom_command(TARGET zdoom POST_BUILD
 			COMMAND ${CMAKE_COMMAND} -E create_symlink
 				$<TARGET_FILE_NAME:zmusic> $<TARGET_SONAME_FILE_NAME:zmusic>

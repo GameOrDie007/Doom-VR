@@ -111,6 +111,11 @@ float DoomVR_EyeFade() { return vr_wall_fade ? gEyeFade : 0.f; }
 // The flat panel's width in metres, and how far away it hangs. A 2.4 m wide
 // screen 2 m away is about 62 degrees across.
 CVAR(Float, vr_panel_width, 2.4f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+// A standalone headset's refresh rate, asked for when the session comes up
+// (XR_FB_display_refresh_rate): 90 on a Quest 3, the rate the game is paced
+// at. 0 leaves the runtime's default (a Quest starts every app at 72 Hz).
+// Only the headset build uses it; the PC runs at the runtime's own rate.
+CVAR(Int, vr_refresh_hz, 90, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_panel_distance, 2.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 // How fast the left stick walks, as a share of Doom's running speed: 0.5 is
@@ -346,11 +351,23 @@ void DoomVR_ArchiveLogs()
 #include "pcvrxr/pcvrxr.h"
 #include "pcvrxr/spectator.h"
 #include "cmdlib.h"
+#include "hw_clock.h"
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <windows.h>
+#endif
+#ifdef __ANDROID__
+// The Khronos loader needs the app's JavaVM and activity; SDL has both.
+#include <SDL2/SDL.h>
+#include <jni.h>
+// The Game Tome's signal file, memory-mapped.
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 /*
 	The Game Tome: Game Or Die's book of the game's manual, an OpenXR API layer of its
@@ -364,11 +381,17 @@ void DoomVR_ArchiveLogs()
 */
 namespace
 {
+	// The layer's longs are Windows longs (32 bits); on a 64-bit Linux long is 64.
+#ifdef _WIN32
+	typedef long TomeLong;
+#else
+	typedef int32_t TomeLong;
+#endif
 	struct TomeSignal
 	{
 		unsigned magic, size;
-		volatile long ready, open, showing;
-		long mainHand, floating;
+		volatile TomeLong ready, open, showing;
+		TomeLong mainHand, floating;
 		char tomeDir[512];
 	};
 	static_assert(sizeof(TomeSignal) == 540, "the Game Tome block is 540 bytes");
@@ -407,6 +430,27 @@ namespace
 
 	TomeSignal* Tome()
 	{
+#if defined(__ANDROID__)
+		// A standalone headset: the layer (in this app's APK, loaded by the
+		// OpenXR loader, never by the game) keeps the same 540-byte block as
+		// a file, $GAMETOME_HOME/signal, memory-mapped by both. It appears
+		// when the OpenXR instance is made; until then there is no book.
+		if (gTome) return gTome;
+		const char* home = getenv("GAMETOME_HOME");
+		if (!home || !*home) return nullptr;
+		const int fd = open((std::string(home) + "/signal").c_str(), O_RDWR);
+		if (fd < 0) return nullptr;
+		void* v = mmap(nullptr, sizeof(TomeSignal), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+		close(fd);
+		if (v == MAP_FAILED) return nullptr;
+		auto* s = static_cast<TomeSignal*>(v);
+		if (s->magic != 0x31425447u || s->size != sizeof(TomeSignal)) { munmap(v, sizeof(TomeSignal)); return nullptr; }
+		Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: Game Tome - the layer's signal is up (%s/signal)\n", home);
+		return gTome = s;
+#elif !defined(_WIN32)
+		// No layer on this platform yet: no book, and the game says so when asked.
+		return nullptr;
+#else
 		if (gTome) return gTome;
 		char name[64];
 		snprintf(name, sizeof(name), "Local\\GameOrDie.GameTome.%lu", (unsigned long)GetCurrentProcessId());
@@ -417,6 +461,7 @@ namespace
 		auto* s = static_cast<TomeSignal*>(v);
 		if (s && (s->magic != 0x31425447u || s->size != sizeof(TomeSignal))) { UnmapViewOfFile(v); s = nullptr; }
 		return gTome = s;
+#endif
 	}
 }
 
@@ -439,6 +484,7 @@ namespace
 	bool gTomePaused = false;
 	bool gTomeWasShowing = false;
 
+#ifdef _WIN32
 	BOOL CALLBACK FindOurWindow(HWND w, LPARAM out)
 	{
 		DWORD pid = 0;
@@ -490,6 +536,9 @@ namespace
 		Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: Game Tome open - in front was %s \"%s\" (runs %s); the game's window brought to the front: %s\n",
 		       exe[0] ? (base ? base + 1 : exe) : "(no window)", title, admin, moved ? "yes" : "NO - Windows refused");
 	}
+#else
+	void TomeKeyboardToUs() {}
+#endif
 
 	/*
 		Typing in the book from the game's own keyboard input. The layer types
@@ -505,7 +554,7 @@ namespace
 	struct TomeKeys
 	{
 		unsigned magic, size;
-		volatile long head, tail;
+		volatile TomeLong head, tail;
 		unsigned key[64];
 	};
 	static_assert(sizeof(TomeKeys) == 272, "the Game Tome's key block is 272 bytes");
@@ -515,6 +564,9 @@ namespace
 
 	TomeKeys* TomeKeyBlock()
 	{
+#ifndef _WIN32
+		return nullptr;
+#else
 		if (gTomeKeys) return gTomeKeys;
 		char name[64];
 		snprintf(name, sizeof(name), "Local\\GameOrDie.GameTome.Keys.%lu", (unsigned long)GetCurrentProcessId());
@@ -525,6 +577,7 @@ namespace
 		auto* k = static_cast<TomeKeys*>(v);
 		if (k && (k->magic != 0x314B5447u || k->size != sizeof(TomeKeys))) { UnmapViewOfFile(v); k = nullptr; }
 		return gTomeKeys = k;
+#endif
 	}
 
 	bool TomeShowing()
@@ -538,6 +591,10 @@ namespace
 	// combinations, F keys, arrows).
 	unsigned TomeChar(unsigned vk, unsigned scan)
 	{
+#ifndef _WIN32
+		(void)vk; (void)scan;
+		return 0;
+#else
 		if (vk == VK_BACK) return 8;
 		if (vk == VK_RETURN) return 13;
 		if (vk == VK_ESCAPE) return 27;
@@ -548,6 +605,7 @@ namespace
 		WCHAR buf[4];
 		const int n = ToUnicodeEx(vk, scan, state, buf, 4, 4 /* the keyboard's state left as it was */, GetKeyboardLayout(0));
 		return n == 1 && buf[0] >= 32 ? unsigned(buf[0]) : 0;
+#endif
 	}
 
 	void TomeKeep(TomeSignal* s)
@@ -596,7 +654,11 @@ bool DoomVR_TomeKey(unsigned vk, unsigned scan, bool down)
 	TomeKeys* k = ch ? TomeKeyBlock() : nullptr;
 	if (!k) return false;
 	k->key[(unsigned long)k->head % 64] = ch;
+#ifdef _WIN32
 	InterlockedIncrement(&k->head);	// after the key: the layer reads up to head
+#else
+	__sync_fetch_and_add(&k->head, 1);
+#endif
 	gTomeAte[vk] = true;
 	if (!gTomeKeysSaid)
 	{
@@ -608,6 +670,10 @@ bool DoomVR_TomeKey(unsigned vk, unsigned scan, bool down)
 
 bool DoomVR_TomeOwnsKey(unsigned message, unsigned long long wparam)
 {
+#ifndef _WIN32
+	(void)message; (void)wparam;
+	return false;
+#else
 	switch (message)
 	{
 	case WM_CHAR:
@@ -618,6 +684,7 @@ bool DoomVR_TomeOwnsKey(unsigned message, unsigned long long wparam)
 	default:
 		return false;
 	}
+#endif
 }
 
 bool DoomVR_InventoryGame();	// p_user.cpp: Heretic + Hexen's layout, or Doom's
@@ -630,6 +697,12 @@ namespace
 	// Where the time went since the last report, in the layer's calls. The
 	// rest of each frame is the engine's.
 	double gWaitMs = 0, gEyeMs = 0, gSubmitMs = 0;
+#ifdef __ANDROID__
+	// The performance line's split of the engine's time (DoomVR_PerfAdd).
+	constexpr int kPerfSlots = 20;	// 12-19: the end-of-scene pass, split (hw_drawinfo.cpp)
+	double gPerf[kPerfSlots] = {};
+	long long gPerfLines = 0, gPerfFlats = 0, gPerfSprites = 0;
+#endif
 
 	bool Tracing()
 	{
@@ -670,12 +743,34 @@ namespace
 		// comes into it. VirtualDesktopXR grants a "standing" space with a
 		// play area of 0 x 0 m, whose floor is exactly that guess.
 		cfg.space = pcvrxr::Space::Seated;
+#ifdef __ANDROID__
+		// A standalone headset: the loader needs the app's JavaVM and
+		// activity to find the runtime. SDL has both.
+		{
+			JNIEnv* env = (JNIEnv*)SDL_AndroidGetJNIEnv();
+			JavaVM* vm = nullptr;
+			if (env) env->GetJavaVM(&vm);
+			cfg.androidVM = vm;
+			cfg.androidActivity = SDL_AndroidGetActivity();
+			if (const char* dev = getenv("DOOMVR_DEVICE")) Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: standalone on %s\n", dev);
+		}
+		// The compositor's quality supersampling and sharpening on the world:
+		// a Quest's recommended eye buffer is below its panel, and this is how
+		// its own apps stay crisp without paying for a bigger one.
+		cfg.compositorQuality = true;
+#endif
 		// The Game Tome's layer, when it is installed beside the game.
+#ifdef __ANDROID__
+		// A standalone headset: the layer is in this APK (assets/openxr/1/api_layers/
+		// explicit.d names it; the loader finds it there), asked for by name.
+		cfg.apiLayerName = "XR_APILAYER_GAMEORDIE_game_tome";
+#else
 		if (FileExists((TomeHome() + "/GameTomeLayer.json").GetChars()))
 		{
 			cfg.apiLayerDir = TomeHome().GetChars();
 			cfg.apiLayerName = "XR_APILAYER_GAMEORDIE_game_tome";
 		}
+#endif
 
 		// A failed bring-up keeps no session object: there is nothing to shut
 		// down later, and nothing that could claim to have been.
@@ -700,6 +795,14 @@ namespace
 		gSession->EyeBufferSize(w, h);
 		Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: headset up on %s, %dx%d per eye.\n", gSession->RuntimeName(), w, h);
 		gUp = true;
+#ifdef __ANDROID__
+		// A standalone headset starts every app at its lowest rate (a Quest 3:
+		// 72 Hz) until the app asks; the PC over Link ran at the player's Link
+		// setting, and 72 read as "a bit less smooth". vr_refresh_hz 0 leaves
+		// the runtime's choice. The performance line in the log says what was
+		// actually held.
+		if (vr_refresh_hz > 0) gSession->SetRefreshRate((float)vr_refresh_hz);
+#endif
 
 		// The 2D's panel. 1920x1080 holds any canvas sharply enough at 62
 		// degrees; the canvas is drawn across all of it and the quad takes the
@@ -866,7 +969,7 @@ namespace
 		was measured on Touch, where the grip sits in the aim's frame pitched up
 		60 degrees, 3 cm down and 9.5 cm back (VDXR and SteamVR alike). An Index
 		reports 55.3 degrees with 5 degrees of yaw and roll and the grip 2.5 cm
-		lower (a player's log, 31 Oct 2026), so the gun sat off in the hand and
+		lower (a player's log), so the gun sat off in the hand and
 		the shots left it at an angle. On the controllers we have not measured
 		this way, the aim is laid along their grip as Touch would report it:
 		the hand, where the player feels the controller, stays the runtime's.
@@ -1110,7 +1213,7 @@ namespace
 
 	// The game slowed while the ring is up: the engine's own time scale, with
 	// the input clock re-based on each change, or the frame's turning reads
-	// the jump in the scaled clock as one huge step (RazeXR's finding).
+	// the jump in the scaled clock as one huge step (seen in another of our ports).
 	void WheelSlow(bool on)
 	{
 		if (on && !gWheelSlowed && !netgame)
@@ -3583,7 +3686,67 @@ void DoomVR_EndFrame()
 	gSubmitMs += dt;
 	if (trace) Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR trace: frame %d EndFrame after %.2f ms\n", gFrames, dt);
 	++gFrames;
+#ifdef __ANDROID__
+	// Standalone: a performance line every 15 s, so a headset's log says what
+	// each game held - the rate the runtime runs at, the frames delivered,
+	// and where each frame's time went: waiting on the runtime (the frame
+	// was early), the eye copies and the submit (the layer), the engine (the
+	// game itself, CPU), and the GPU's own time for the frame. A second line
+	// splits the engine: the game tics, events, the display (with the
+	// renderer's own clocks: the scene's BSP walk and draw-list build, the
+	// draw submission, post-processing, the 2D), the music update, and the
+	// HUD panel; plus what the scene held.
+	{
+		static double perfAt = 0, perfWait = 0, perfEye = 0, perfSubmit = 0;
+		static int perfFrames = 0;
+		// The renderer's clocks are per frame: add this frame's.
+		gPerf[5] += All.TimeMS(); gPerf[6] += Bsp.TimeMS(); gPerf[7] += ProcessAll.TimeMS(); gPerf[8] += RenderAll.TimeMS();
+		gPerf[9] += PostProcess.TimeMS(); gPerf[10] += twoD.TimeMS(); gPerf[11] += Finish.TimeMS();
+		gPerfLines += rendered_lines; gPerfFlats += rendered_flats; gPerfSprites += rendered_sprites;
+		const double now = NowMs();
+		if (perfAt == 0) { perfAt = now; perfFrames = gFrames; perfWait = gWaitMs; perfEye = gEyeMs; perfSubmit = gSubmitMs; }
+		else if (now - perfAt >= 15000)
+		{
+			const int n = gFrames - perfFrames;
+			if (n > 0)
+			{
+				const double ms = (now - perfAt) / n;
+				const double wait = (gWaitMs - perfWait) / n, eyes = (gEyeMs - perfEye) / n, submit = (gSubmitMs - perfSubmit) / n;
+				double gpuAvg = 0, gpuMax = 0; int gpuN = 0;
+				bool DoomVR_GpuTimerStats(double& avgMs, double& maxMs, int& frames);
+				const bool gpu = DoomVR_GpuTimerStats(gpuAvg, gpuMax, gpuN);
+				char line[400];
+				snprintf(line, sizeof(line),
+				         "DoomVR: perf %.0f s: %.0f Hz; %d frames, %.1f fps; per frame %.2f ms = runtime wait %.2f + eyes %.2f + submit %.2f + engine %.2f",
+				         (now - perfAt) / 1000.0, gSession->RefreshRate(), n, 1000.0 / ms, ms, wait, eyes, submit, ms - wait - eyes - submit);
+				if (gpu) snprintf(line + strlen(line), sizeof(line) - strlen(line), "; GPU %.2f ms avg, %.2f max", gpuAvg, gpuMax);
+				Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "%s\n", line);
+				double p[kPerfSlots];
+				for (int i = 0; i < kPerfSlots; ++i) p[i] = gPerf[i] / n;
+				Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY),
+				       "DoomVR: perf split: tics %.2f, events %.2f, display %.2f (scene %.2f: bsp %.2f, lists %.2f, draw %.2f, post %.2f; 2D %.2f; last swap %.2f), music %.2f, panel %.2f ms; scene per frame: %d lines, %d flats, %d sprites\n",
+				       p[0], p[1], p[2], p[5], p[6], p[7], p[8], p[9], p[10], p[11], p[3], p[4],
+				       (int)(gPerfLines / n), (int)(gPerfFlats / n), (int)(gPerfSprites / n));
+				Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY),
+				       "DoomVR: perf post split (both eyes): dot %.2f, 3D guns %.2f, hands %.2f, wrist %.2f, holsters %.2f, wheel %.2f, weapon sprites %.2f, blends %.2f ms\n",
+				       p[12], p[13], p[14], p[15], p[16], p[17], p[18], p[19]);
+			}
+			perfAt = now; perfFrames = gFrames; perfWait = gWaitMs; perfEye = gEyeMs; perfSubmit = gSubmitMs;
+			for (int i = 0; i < kPerfSlots; ++i) gPerf[i] = 0;
+			gPerfLines = gPerfFlats = gPerfSprites = 0;
+		}
+	}
+#endif
 }
+
+#ifdef __ANDROID__
+// d_main.cpp and the GLES Flush add their parts of the frame here:
+// 0 tics, 1 events, 2 display, 3 music, 4 the HUD panel (5-11 the renderer's own clocks).
+void DoomVR_PerfAdd(int slot, double ms)
+{
+	if (slot >= 0 && slot < kPerfSlots) gPerf[slot] += ms;
+}
+#endif
 
 // Test hooks. None of them is a setting and none is in a menu.
 
@@ -3806,8 +3969,10 @@ void DoomVR_LoadKeepAlive()
 	const double now = NowMs();
 	if (now - last < 50) return;
 	last = now;
+#ifdef _WIN32
 	MSG msg;
 	PeekMessageW(&msg, nullptr, 0, 0, PM_NOREMOVE);
+#endif
 	DoomVR_RestartFrame();
 }
 

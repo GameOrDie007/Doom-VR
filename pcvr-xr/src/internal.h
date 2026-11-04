@@ -9,6 +9,22 @@
 
 #include "pcvrxr/pcvrxr.h"
 
+#ifdef __ANDROID__
+// Android - the Quest 3, and the Steam Frame through Lepton: OpenGL ES through
+// EGL, the Khronos loader told where the app lives, no Direct3D and no window.
+// The same layer, the same seam; only the binding and the loader differ.
+#include <jni.h>
+#include <unistd.h>	// gettid, for XR_KHR_android_thread_settings
+#include <EGL/egl.h>
+#include <GLES3/gl31.h>
+#include <dlfcn.h>
+#define XR_USE_PLATFORM_ANDROID
+#define XR_USE_GRAPHICS_API_OPENGL_ES
+#ifndef APIENTRY
+#define APIENTRY
+#endif
+#define PCVRXR_SEP "/"
+#else
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <tlhelp32.h>
@@ -23,8 +39,23 @@
 #define XR_USE_PLATFORM_WIN32
 #define XR_USE_GRAPHICS_API_OPENGL
 #define XR_USE_GRAPHICS_API_D3D11
+#define PCVRXR_D3D11 1
+#define PCVRXR_SEP "\\"
+#endif
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
+
+// The GL flavour the session binds: OpenGL ES on Android, OpenGL elsewhere.
+// The swapchain image structures have the same shape (type, next, image).
+#ifdef __ANDROID__
+typedef XrSwapchainImageOpenGLESKHR XrSwapchainImageGL;
+#define PCVRXR_SWAPCHAIN_IMAGE_GL_TYPE XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_ES_KHR
+#define PCVRXR_GL_EXTENSION_NAME XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME
+#else
+typedef XrSwapchainImageOpenGLKHR XrSwapchainImageGL;
+#define PCVRXR_SWAPCHAIN_IMAGE_GL_TYPE XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_KHR
+#define PCVRXR_GL_EXTENSION_NAME XR_KHR_OPENGL_ENABLE_EXTENSION_NAME
+#endif
 
 #include <cstdio>
 #include <cstdarg>
@@ -58,17 +89,50 @@ typedef void (APIENTRY *PFNBLITFRAMEBUFFER)(GLint, GLint, GLint, GLint, GLint, G
                                             GLint, GLint, GLbitfield, GLenum);
 typedef void (APIENTRY *PFNBINDBUFFER)(GLenum, GLuint);
 
+#ifndef GL_FRAMEBUFFER
 #define GL_FRAMEBUFFER            0x8D40
+#endif
+#ifndef GL_READ_FRAMEBUFFER
 #define GL_READ_FRAMEBUFFER       0x8CA8
+#endif
+#ifndef GL_DRAW_FRAMEBUFFER
 #define GL_DRAW_FRAMEBUFFER       0x8CA9
+#endif
+#ifndef GL_COLOR_ATTACHMENT0
 #define GL_COLOR_ATTACHMENT0      0x8CE0
+#endif
+#ifndef GL_DEPTH_ATTACHMENT
 #define GL_DEPTH_ATTACHMENT       0x8D00
+#endif
+#ifndef GL_RENDERBUFFER
 #define GL_RENDERBUFFER           0x8D41
+#endif
+#ifndef GL_DEPTH_COMPONENT24
 #define GL_DEPTH_COMPONENT24      0x81A6
+#endif
+#ifndef GL_FRAMEBUFFER_COMPLETE
 #define GL_FRAMEBUFFER_COMPLETE   0x8CD5
+#endif
+#ifndef GL_RGBA8
 #define GL_RGBA8                  0x8058
+#endif
+#ifndef GL_FRAMEBUFFER_SRGB
 #define GL_FRAMEBUFFER_SRGB       0x8DB9
+#endif
+#ifndef GL_CLAMP_TO_EDGE
 #define GL_CLAMP_TO_EDGE          0x812F
+#endif
+
+// Where colour goes on a user framebuffer. Desktop GL names one buffer;
+// OpenGL ES only has the plural form.
+inline void DrawBuffer0() {
+#ifdef __ANDROID__
+    const GLenum b = GL_COLOR_ATTACHMENT0;
+    glDrawBuffers(1, &b);
+#else
+    glDrawBuffer(GL_COLOR_ATTACHMENT0);
+#endif
+}
 
 struct GLFns {
     PFNGENFRAMEBUFFERS         GenFramebuffers = nullptr;
@@ -87,6 +151,15 @@ struct GLFns {
 };
 
 inline void* GLGet(const char* name) {
+#ifdef __ANDROID__
+    // EGL answers for every GLES entry point, core ones included (EGL 1.5).
+    void* p = (void*)eglGetProcAddress(name);
+    if (p == nullptr) {
+        static void* gles = dlopen("libGLESv3.so", RTLD_NOW | RTLD_LOCAL);
+        p = gles ? dlsym(gles, name) : nullptr;
+    }
+    return p;
+#else
     void* p = (void*)wglGetProcAddress(name);
     if (p == nullptr || p == (void*)0x1 || p == (void*)0x2 ||
         p == (void*)0x3 || p == (void*)-1) {
@@ -95,6 +168,7 @@ inline void* GLGet(const char* name) {
         p = gl ? (void*)GetProcAddress(gl, name) : nullptr;
     }
     return p;
+#endif
 }
 
 inline bool LoadGL(GLFns& f) {
@@ -118,8 +192,10 @@ inline bool LoadGL(GLFns& f) {
 
 struct Eye {
     XrSwapchain swapchain = XR_NULL_HANDLE;
-    std::vector<XrSwapchainImageOpenGLKHR> images;
+    std::vector<XrSwapchainImageGL> images;
+#ifdef PCVRXR_D3D11
     std::vector<XrSwapchainImageD3D11KHR> d3dImages;   // D3D11 sessions only
+#endif
     std::vector<GLuint> fbos;
     GLuint depth = 0;
     uint32_t index = 0;   // the image acquired this frame
@@ -207,6 +283,7 @@ struct Session::Impl {
     bool checkedSwapchainTexture = false;
 
     GLFns gl;
+#ifdef PCVRXR_D3D11
     // D3D11 sessions: the game's device and its immediate context. Neither is
     // owned - the game made them and outlives the session.
     ID3D11Device* d3dDevice = nullptr;
@@ -215,6 +292,10 @@ struct Session::Impl {
     bool CopyIntoSwapchain(XrSwapchain sc, const std::vector<XrSwapchainImageD3D11KHR>& imgs,
                            uint32_t& index, void* tex, int w, int h, const char* what);
     void DumpD3D(ID3D11Texture2D* tex, int w, int h, const char* path, const char* alphaPath);
+#else
+    // No Direct3D on this platform: every session is a GL one.
+    bool IsD3D() const { return false; }
+#endif
     std::string runtimeName;
     std::string failure;
 
@@ -271,8 +352,10 @@ struct Session::Impl {
 
     // ---- the flat panel ----------------------------------------------------
     XrSwapchain panelSwapchain = XR_NULL_HANDLE;
-    std::vector<XrSwapchainImageOpenGLKHR> panelImages;
+    std::vector<XrSwapchainImageGL> panelImages;
+#ifdef PCVRXR_D3D11
     std::vector<XrSwapchainImageD3D11KHR> panelD3DImages;
+#endif
     std::vector<GLuint> panelFbos;
     uint32_t panelIndex = 0;
     int panelW = 0, panelH = 0;
@@ -292,6 +375,14 @@ struct Session::Impl {
     bool haveRefreshRate = false;
     bool fovLogged = false;
     bool haveFrameControllers = false;
+    bool haveLayerSettings = false;	// XR_FB_composition_layer_settings (Quest-class runtimes)
+    bool layerSettingsLogged = false;
+    // A standalone headset's clocks and thread scheduling (Android only):
+    // XR_EXT_performance_settings and XR_KHR_android_thread_settings.
+    bool havePerfSettings = false;
+    bool haveThreadSettings = false;
+    PFN_xrVoidFunction pfnSetPerfLevel = nullptr;
+    PFN_xrVoidFunction pfnSetAndroidThread = nullptr;
     bool apiLayerOn = false;	// the port's extra API layer is in the instance
     PFN_xrVoidFunction pfnGetDisplayRefreshRate = nullptr;
     PFN_xrVoidFunction pfnRequestDisplayRefreshRate = nullptr;

@@ -22,6 +22,8 @@
 */
 
 #include "gles_system.h"
+#include "printf.h"
+#include <string.h>
 
 #include "c_cvars.h"
 #include "hw_material.h"
@@ -118,6 +120,15 @@ unsigned int FHardwareTexture::CreateTexture(unsigned char * buffer, int w, int 
 
 	int sourcetype;
 
+	// DoomVR: on OpenGL ES the engine's BGRA pixels used to go up as a BGRA
+	// texture (GL_EXT_texture_format_BGRA8888). OpenGL ES 3 refuses to build
+	// mipmaps for that format (glGenerateMipmap: GL_INVALID_OPERATION), so
+	// every mipmapped texture - every wall and floor - was incomplete and
+	// sampled black; only the unmipmapped sprites showed. The bytes now go up
+	// as RGBA and the texture's swizzle swaps red and blue back, which ES 3.0
+	// has, costs nothing, and mipmaps fine.
+	bool swizzleBGRA = false;
+
 	if (gles.glesMode == GLES_MODE_GLES)
 	{
 		if (glTextureBytes == 1)
@@ -128,8 +139,9 @@ unsigned int FHardwareTexture::CreateTexture(unsigned char * buffer, int w, int 
 		}
 		else
 		{
-			sourcetype = GL_BGRA; // These two must be the same
-			texformat = GL_BGRA;
+			sourcetype = GL_RGBA;
+			texformat = GL_RGBA;
+			swizzleBGRA = true;
 		}
 	}
 	else
@@ -147,7 +159,19 @@ unsigned int FHardwareTexture::CreateTexture(unsigned char * buffer, int w, int 
 		}
 	}
 
+	while (glGetError() != GL_NO_ERROR) {}	// DoomVR: a clean slate, so the errors below are this upload's
 	glTexImage2D(GL_TEXTURE_2D, 0, texformat, rw, rh, 0, sourcetype, GL_UNSIGNED_BYTE, buffer);
+	{
+		// DoomVR: a texture that failed to upload samples black with no word from GL; say so, once per kind.
+		const GLenum err = glGetError();
+		static int said = 0;
+		if (err != GL_NO_ERROR && said < 8) { said++; Printf("GLES: glTexImage2D(%dx%d, format 0x%x/0x%x, %d bytes) failed: GL error 0x%x (%s)\n", rw, rh, texformat, sourcetype, glTextureBytes, err, name ? name : ""); }
+	}
+	if (swizzleBGRA)
+	{
+		glTexParameteri(GL_TEXTURE_2D, 0x8E42 /*GL_TEXTURE_SWIZZLE_R*/, GL_BLUE);
+		glTexParameteri(GL_TEXTURE_2D, 0x8E44 /*GL_TEXTURE_SWIZZLE_B*/, GL_RED);
+	}
 
 	if (gles.glesMode != GLES_MODE_GLES)
 	{
@@ -165,6 +189,11 @@ unsigned int FHardwareTexture::CreateTexture(unsigned char * buffer, int w, int 
 	if (mipmap && TexFilter[gl_texture_filter].mipmapping)
 	{
 		glGenerateMipmap(GL_TEXTURE_2D);
+		{
+			const GLenum err = glGetError();
+			static int said = 0;
+			if (err != GL_NO_ERROR && said < 8) { said++; Printf("GLES: glGenerateMipmap(%dx%d, format 0x%x, %d bytes) failed: GL error 0x%x (%s)\n", rw, rh, texformat, glTextureBytes, err, name ? name : ""); }
+		}
 		mipmapped = true;
 	}
 

@@ -95,6 +95,7 @@ public:
 	void CopyToBackbuffer(const IntRect *bounds, bool applyGamma);
 	void DrawPresentTexture(const IntRect &box, bool applyGamma);
 	void Flush();
+	void PresentHeadsetEye(int eye); // DoomVR: the scene buffer into that eye of the headset
 	void BeginFrame();
 
 	bool StartOffscreen();

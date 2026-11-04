@@ -106,7 +106,14 @@ if ( WIN32 )
         utils/win32_glibstubs.c
         utils/win32_glibstubs.h
     )
-endif ( WIN32 )
+elseif ( ANDROID )
+    # No glib on a standalone headset: the same stubs on POSIX threads.
+    set( fluidsynth_SOURCES
+        ${fluidsynth_SOURCES}
+        utils/posix_glibstubs.c
+        utils/posix_glibstubs.h
+    )
+endif ()
 
 set ( public_HEADERS
     ../include/fluidsynth/audio.h
@@ -154,7 +161,9 @@ target_include_directories ( fluidsynth PRIVATE
 )
 
 
-if (NOT WIN32)
+if (ANDROID)
+   target_compile_definitions ( fluidsynth PRIVATE WITH_GLIB_STUBS )
+elseif (NOT WIN32)
    find_package(PkgConfig REQUIRED)
    pkg_search_module(GLIB REQUIRED glib-2.0)
    target_include_directories ( fluidsynth PUBLIC ${GLIB_INCLUDE_DIRS} )

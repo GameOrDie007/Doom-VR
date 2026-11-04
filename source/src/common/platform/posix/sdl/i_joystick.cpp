@@ -692,12 +692,18 @@ void I_GetJoysticks(TArray<IJoystickConfig *> &sticks)
 		JoystickManager->GetDevices(sticks);
 }
 
+void DoomVR_AddAxes(float* axes);	// doomvr_headset.cpp
+
 void I_GetAxes(float axes[NUM_AXIS_CODES])
 {
 	for (int i = 0; i < NUM_AXIS_CODES; ++i)
 	{
 		axes[i] = 0.0f;
 	}
+
+	// DoomVR: the headset's controllers, whatever use_joystick says - it is
+	// about desk gamepads, and a player in a headset has nothing else.
+	DoomVR_AddAxes(axes);
 
 	if (use_joystick && JoystickManager)
 	{

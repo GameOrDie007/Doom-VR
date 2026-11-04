@@ -218,6 +218,13 @@ int main (int argc, char **argv)
 
 #ifdef PROGDIR
 	progdir = PROGDIR;
+#elif defined(__ANDROID__)
+	// DoomVR: the engine's own files were unpacked from the APK into the
+	// folder the activity names (DOOMVR_PROGDIR); the game runs in HOME, the
+	// player's game folder, so its logs and settings land there.
+	if (const char* pd = getenv("DOOMVR_PROGDIR")) progdir = pd;
+	else progdir = "./";
+	if (const char* home = getenv("HOME")) { if (chdir(home) != 0) fprintf(stderr, "DoomVR: cannot enter %s\n", home); }
 #else
 	char program[PATH_MAX];
 	if (realpath (argv[0], program) == NULL)

@@ -111,6 +111,7 @@ namespace OpenGLESRenderer
 		unsigned int maxlights;
 		unsigned int numlightvectors;
 		bool useMappedBuffers;
+		bool unsyncUploads;	// DoomVR: buffer uploads mapped unsynchronized, fenced per pipeline buffer (OpenGL ES 3 on a headset)
 		bool depthStencilAvailable;
 		bool npotAvailable;
 		bool forceGLSLv100;

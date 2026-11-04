@@ -21,6 +21,14 @@
 #include "printf.h"
 
 CVAR(Bool, gles_use_mapped_buffer, false, 0);
+// DoomVR: on OpenGL ES 3 each upload into a buffer the GPU is still reading (the
+// late fills after the scene's draws, every translucent object's vertices) is
+// written through an unsynchronized map of its own fresh range instead of a
+// sub-data upload the driver must serialize against those draws; the pipeline's
+// buffers are fenced so a buffer is reused only once its frame is done. Off, the
+// driver stalls or copies the whole 40 MB buffer per upload (the Quest 3: the
+// crosshair dot's 2.7-7.9 ms, the draw lists growing with the sprite count).
+CVAR(Bool, gles_unsync_uploads, true, 0);
 CVAR(Bool, gles_force_glsl_v100, false, 0);
 CVAR(Int, gles_max_lights_per_surface, 32, 0);
 EXTERN_CVAR(Bool, gl_customshader);
@@ -183,6 +191,7 @@ namespace OpenGLESRenderer
 		gles.flags = RFL_NO_CLIP_PLANES;
 
 		gles.useMappedBuffers = gles_use_mapped_buffer;
+		gles.unsyncUploads = false;
 		gles.forceGLSLv100 = gles_force_glsl_v100;
 		gles.maxlights = gles_max_lights_per_surface;
 		gles.numlightvectors = (gles.maxlights * LIGHT_VEC4_NUM);
@@ -223,6 +232,12 @@ namespace OpenGLESRenderer
 			gles.npotAvailable = CheckExtension("GL_OES_texture_npot");
 			gles.depthClampAvailable = CheckExtension("GL_EXT_depth_clamp");
 			gles.anistropicFilterAvailable = CheckExtension("GL_EXT_texture_filter_anisotropic");
+			// DoomVR: "OpenGL ES 3.2 V@..." parses as 0 above; the ES version is after the words.
+			const double esVersion = strtod(glVersionStr + strlen("OpenGL ES"), NULL);
+			gles.unsyncUploads = !gles.useMappedBuffers && gles_unsync_uploads && esVersion >= 3.0 &&
+				glMapBufferRange && glUnmapBuffer && glFenceSync && glClientWaitSync && glDeleteSync;
+			Printf("GLES: OpenGL ES %.1f, buffer uploads %s\n", esVersion,
+				gles.unsyncUploads ? "mapped unsynchronized, the pipeline's buffers fenced" : "by sub-data (the driver serializes them)");
 		}
 		else if (gles.glesMode == GLES_MODE_OGL2)
 		{

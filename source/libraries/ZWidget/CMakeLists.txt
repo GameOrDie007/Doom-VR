@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.11)
 project(zwidget)
 
-if (UNIX AND NOT APPLE)
+if (UNIX AND NOT APPLE AND NOT ANDROID)
 	include(FindPkgConfig)
 	pkg_check_modules(DBUS dbus-1)
 	if (!DBUS_FOUND)

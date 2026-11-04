@@ -1,7 +1,8 @@
 # Doom VR
 
 Doom VR is a Game Or Die project: Doom, Doom II, Final Doom, Doom 64, Heretic, Hexen, Strife and
-dozens of megawads and mods in PC VR, built on [UZDoom](https://github.com/UZDoom/UZDoom) 5.0.1.
+dozens of megawads and mods in PC VR, and standalone on the Meta Quest 3 and the Steam Frame,
+built on [UZDoom](https://github.com/UZDoom/UZDoom) 5.0.1.
 
 ## Install
 
@@ -14,9 +15,9 @@ dozens of megawads and mods in PC VR, built on [UZDoom](https://github.com/UZDoo
 3. Start your VR runtime (Virtual Desktop, SteamVR or Quest Link) and press **PRESS START**, or use
    the **Doom VR** shortcut on your desktop. The game picker opens on Doom; pick any game.
 
-**Installing by hand:** download `Doom-VR-1.0-PCVR.zip` from the
-[latest release](https://github.com/GameOrDie007/Doom-VR/releases/latest), extract it anywhere and
-run **Setup.bat** in the extracted folder. Own a game somewhere Setup doesn't look? Drop its folder
+**Installing by hand:** download `Doom-VR-1.0.1-PCVR.zip` from
+[release 1.0.1](https://github.com/GameOrDie007/Doom-VR/releases/tag/v1.0.1) (the PC version did not
+change in 1.1), extract it anywhere and run **Setup.bat** in the extracted folder. Own a game somewhere Setup doesn't look? Drop its folder
 onto Setup.bat.
 
 You need Windows 10 or 11 (64-bit), a PC VR headset with an OpenXR runtime, a graphics card that
@@ -28,7 +29,37 @@ notes.** Run the new version's Setup.bat, or update in the installer.
 
 **Tested on:** Meta Quest 3 over Virtual Desktop, on an RTX 3080 Ti and an RTX 5080, at 90 frames a
 second; the Steam Frame through SteamVR. Valve Index, Vive and Windows Mixed Reality controllers are
-supported but not yet tested by us.
+supported but not yet tested by us. Standalone: Meta Quest 3 at 90 Hz (Doom at 76 to 84 frames a
+second, Brutal Doom 64 at about 80); the Steam Frame standalone build is the same app and has not yet
+been played on a Frame by us.
+
+## Standalone on Meta Quest 3
+
+Doom VR also runs on the Quest 3 by itself, with no PC while you play: the same games and mods, the
+3D guns in our hands, the Game Tome, Switch Game and VR Options. Your games, mods, settings and hand
+fits come from your PC's Doom VR install, so install the PC version first.
+
+1. In the installer, pick **QUEST 3** at the top of the Doom VR card.
+2. Turn the headset on, plug it into the PC with a USB-C cable, and press **INSTALL**. The first
+   time, put the headset on and choose Allow.
+3. On the headset: Library, Unknown Sources, **Doom VR**.
+
+By hand: download `Doom-VR-1.1-Quest.zip` from [Releases](../../releases), unzip it on your PC and
+double-click **Setup.bat**. The headset needs Developer mode, turned on once in the Meta Horizon
+phone app; the download's README walks through it. Run the installer or Setup again after an
+update: it copies only what changed and keeps your saved games and settings.
+
+## Standalone on Steam Frame
+
+The same download runs on a Valve Steam Frame with no PC, in the Frame's own library.
+
+1. On the Frame, once: Settings, System, Enable Developer Mode; Settings, Developer, Set User
+   Password; and install Lepton from the Store.
+2. With the Frame on and on the same home network as the PC, pick **STEAM FRAME** at the top of
+   the Doom VR card in the installer and press **INSTALL** (by hand: **Setup Steam Frame.bat** in
+   the unzipped download). The first time, it pairs with the Frame: on the Frame, Settings,
+   Developer, Pair new host, then Accept.
+3. On the Frame: Library, **Doom VR**.
 
 ## Video and screenshots
 
@@ -47,6 +78,8 @@ supported but not yet tested by us.
 
 ## What you get
 
+- **PC VR, Quest 3 and Steam Frame.** The PC version, and the same Doom VR as an app on the
+  Quest 3 and the Steam Frame, with no PC while you play.
 - **Every game in one place.** The game picker lists them all, grouped, with covers, and Switch
   Game in the main menu brings it back any time: pick a game and it loads in a second or two,
   without leaving the headset. Build Your Own Game puts a game together with maps, a gameplay mod,
@@ -76,8 +109,10 @@ supported but not yet tested by us.
 - **Do I need my own games?** For Doom, Doom II, Final Doom, Doom 64, Heretic, Hexen and Strife,
   yes: Steam or GOG, the classic releases and the re-releases alike.
 - **Which headsets?** Any PC VR headset with an OpenXR runtime: Virtual Desktop, Steam Link, Quest
-  Link or Air Link, Index, Vive, Windows Mixed Reality, and the Steam Frame through SteamVR.
-- **Standalone on a Quest 3 or the Steam Frame?** Not yet.
+  Link or Air Link, Index, Vive, Windows Mixed Reality, and the Steam Frame through SteamVR. And
+  standalone on the Quest 3 and the Steam Frame.
+- **Standalone on a Quest 3 or the Steam Frame?** Yes, since 1.1: see Standalone above. The games
+  come from your PC's Doom VR install.
 - **Can I add my own WADs?** Yes: put them in `VR\game\My WADs` and pick them at the bottom of the
   game picker. A WAD with Doom 1 maps plays on Doom, anything else on Doom II; for another game,
   put it in a folder named after that game in the picker (`My WADs\Heretic`). The Modern looks
@@ -125,6 +160,9 @@ cmake --build pcvr-xr/build-x64-mt --config Release --target pcvrxr
 cmake -S source -B build -A x64 -DDOOMVR_PCVRXR=ON -DPCVRXR_DIR=%CD%/pcvr-xr
 cmake --build build --config Release
 ```
+
+The headset app (Quest 3 and Steam Frame) builds from the same tree with the Android NDK and Gradle:
+`source/tools/build-quest.ps1`, whose header lists what it needs.
 
 ## License
 

@@ -32,8 +32,10 @@
 #include "gamestate.h"
 #include "SmackerDecoder.h"
 #include "playmve.h"
+#ifndef DOOMVR_NO_VPX	// DoomVR: a build without libvpx plays no VP8/VP9 video (every shipped build has it)
 #include <vpx/vpx_decoder.h>
 #include <vpx/vp8dx.h>
+#endif
 #include "filesystem.h"
 #include "vm.h"
 #include "printf.h"
@@ -299,6 +301,7 @@ public:
 //
 //---------------------------------------------------------------------------
 
+#ifndef DOOMVR_NO_VPX
 class VpxPlayer : public MoviePlayer
 {
 	bool failed = false;
@@ -337,6 +340,8 @@ public:
 
 public:
 	bool isvalid() { return !failed; }
+	unsigned Width() const { return width; }
+	unsigned Height() const { return height; }
 
 	VpxPlayer(FileReader& fr_, TArray<int>& animSnd_, int flags_, int origframedelay, FString& error) : animSnd(std::move(animSnd_))
 	{
@@ -622,6 +627,7 @@ public:
 		return animtex.GetFrameID();
 	}
 };
+#endif // DOOMVR_NO_VPX
 
 //---------------------------------------------------------------------------
 //
@@ -895,17 +901,24 @@ MoviePlayer* OpenMovie(const char* filename, TArray<int>& ans, const int* framet
 	}
 	else if (!memcmp(id, "DKIF\0\0 \0VP80", 12) || !memcmp(id, "DKIF\0\0 \0VP90", 12))
 	{
+#ifdef DOOMVR_NO_VPX
+		// DoomVR: this build plays no VP8/VP9 video; the game goes on without it.
+		error.Format("%s: video playback is not in this build", filename);
+		return nullptr;
+#else
 		auto anm = new VpxPlayer(fr, ans, frameticks ? frameticks[1] : 0, flags, error);
 		if (!anm->isvalid())
 		{
 			delete anm;
 			return nullptr;
 		}
+		Printf(PRINT_LOG, "Video cutscene: %s (VP%c, %ux%u)\n", filename, id[10], anm->Width(), anm->Height());
 		// VPX files have no sound track, so look for a same-named sound file with a known extension as the soundtrack to be played.
 		static const char* knownSoundExts[] = { "OGG",	"FLAC",	"MP3",	"OPUS", "WAV" };
 		FString name = StripExtension(filename);
 		anm->soundtrack = fileSystem.FindFileWithExtensions(name.GetChars(), knownSoundExts, countof(knownSoundExts));
 		return anm;
+#endif
 	}
 	// add more formats here.
 	else

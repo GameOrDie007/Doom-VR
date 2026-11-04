@@ -590,7 +590,9 @@ static bool LauncherArgs(const FString& bat, TArray<FString>& out)
 	fclose(f);
 	if (line.IsEmpty()) return false;
 	FString dir = LaunchersDir();
+#ifndef __ANDROID__
 	dir.Substitute("/", "\\");
+#endif
 	line.Substitute("%~dp0", dir.GetChars());
 	line.Substitute("%*", "");
 	line.StripRight();
@@ -613,6 +615,13 @@ static bool LauncherArgs(const FString& bat, TArray<FString>& out)
 	for (unsigned i = 0; i < words.Size(); ++i)
 	{
 		if (words[i].CompareNoCase("-config") == 0 || words[i].CompareNoCase("+logfile") == 0) { ++i; continue; }
+#ifdef __ANDROID__
+		// A launcher written on the PC names its files with backslashes; Linux wants slashes.
+		words[i].Substitute("\\", "/");
+		// And picks the PC's video backend; a headset has one renderer, chosen
+		// by the app (the cvar would only print "requires a restart").
+		if (words[i].CompareNoCase("+vid_preferbackend") == 0) { ++i; continue; }
+#endif
 		out.Push(words[i]);
 	}
 	return out.Size() > 0;

@@ -119,6 +119,12 @@ struct Config {
     // one full-eye copy per eye per frame - about 1.4 GB a second at 1852x2056
     // and 90 Hz - and is where MSAA will live when it exists. Off by default.
     bool renderToOwnTarget = false;
+    // Ask the compositor for its quality supersampling and sharpening on the
+    // world layer (XR_FB_composition_layer_settings; the Quest's runtime has
+    // it, PC runtimes mostly not). Costs the compositor, not the game: the
+    // way a standalone headset's picture is kept crisp without a bigger eye
+    // buffer. Ignored where the runtime lacks the extension.
+    bool compositorQuality = false;
     // Extra OpenXR extensions this port wants. They are enumerated first and
     // only the ones the runtime actually has are requested, because ONE
     // unknown name fails xrCreateInstance outright and takes all of VR with
@@ -134,6 +140,12 @@ struct Config {
     // How far below the eye the floor is assumed to be when the runtime has no
     // boundary of its own. Seated players and streaming runtimes hit this.
     float seatedFloorDrop = 1.675f;
+    // Android only (a standalone headset): the app's JavaVM* and its activity
+    // (a jobject), which the Khronos loader needs to find the runtime. SDL
+    // gives both (SDL_AndroidGetJNIEnv()->GetJavaVM, SDL_AndroidGetActivity).
+    // Ignored everywhere else.
+    void* androidVM = nullptr;
+    void* androidActivity = nullptr;
 };
 
 // There is deliberately no multisample setting here. MSAA is not implemented -
@@ -545,7 +557,11 @@ public:
     void        EyeBufferSize(int& width, int& height) const;
 
 private:
+public:
+    // Public only so the layer's own translation units can name it; a port
+    // has no business with it.
     struct Impl;
+private:
     Impl* m;
 };
 

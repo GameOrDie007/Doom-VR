@@ -36,6 +36,13 @@
 
 #include "hw_vrmodes.h"
 #include "v_draw.h"
+#include "doomvr_headset.h"
+#include "printf.h"
+#include <string.h>
+#include <chrono>
+#ifdef __ANDROID__
+void DoomVR_PerfAdd(int slot, double ms);	// doomvr_headset.cpp
+#endif
 
 extern bool vid_hdr_active;
 
@@ -68,8 +75,95 @@ void FGLRenderer::PostProcessScene(int fixedcm, float flash, const std::function
 //
 //-----------------------------------------------------------------------------
 
+// DoomVR: whether this GL can switch the sRGB encode off on an sRGB
+// framebuffer (GL_EXT_sRGB_write_control; Adreno has it). The engine's
+// picture is already in display space, and the headset's images are sRGB:
+// encoded again on the way in, everything would come out pale.
+static bool SrgbWriteControl()
+{
+	static int has = -1;
+	if (has < 0)
+	{
+		const char* ext = (const char*)glGetString(GL_EXTENSIONS);
+		has = ext && strstr(ext, "GL_EXT_sRGB_write_control") ? 1 : 0;
+		if (!has) Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: this GL has no GL_EXT_sRGB_write_control - the headset's picture may come out pale\n");
+	}
+	return has == 1;
+}
+static constexpr GLenum kFramebufferSrgbExt = 0x8DB9;	// GL_FRAMEBUFFER_SRGB_EXT
+
+void FGLRenderer::PresentHeadsetEye(int eye)
+{
+	if (!DoomVR_ShouldRender()) return;
+	int w, h;
+	DoomVR_EyeSize(w, h);
+	IntRect eyeBox;
+	eyeBox.left = eyeBox.top = 0;
+	eyeBox.width = w;
+	eyeBox.height = h;
+
+	FGLPostProcessState savedState;
+	savedState.SaveTextureBindings(2);
+	const bool srgb = SrgbWriteControl();
+	if (srgb) glDisable(kFramebufferSrgbExt);
+	DoomVR_BeginEye(eye);	// binds that eye's image as the draw target
+	mBuffers->BindCurrentTexture(0);
+	DrawPresentTexture(eyeBox, true);
+	DoomVR_EndEye(eye);
+	if (srgb) glEnable(kFramebufferSrgbExt);
+}
+
 void FGLRenderer::Flush()
 {
+	if (DoomVR_Active())
+	{
+		// DoomVR: a frame drawn without the engine's BeginFrame (a screen
+		// wipe) is still paced by the runtime and still submitted.
+		DoomVR_BeginFrame();
+
+		// The second eye: the scene buffer holds it now (the first went at
+		// NextEye). Then the 2D - menus, the HUD, the console - on its own
+		// flat panel, drawn once and flat, not into each eye.
+		PresentHeadsetEye(1);
+		int panelW, panelH;
+		if (DoomVR_PhotoMode() || DoomVR_GameManualShowing())
+		{
+			// Photo mode: the world alone. The Game Tome open: the book is in front.
+		}
+		else
+		{
+#ifdef __ANDROID__
+			const auto panelT0 = std::chrono::steady_clock::now();
+#endif
+			if (DoomVR_BeginPanel(twod->GetWidth(), twod->GetHeight(), panelW, panelH))
+			{
+				const bool srgb = SrgbWriteControl();
+				if (srgb) glDisable(kFramebufferSrgbExt);
+				glClearColor(0, 0, 0, 0);
+				glClear(GL_COLOR_BUFFER_BIT);
+				::Draw2D(twod, gl_RenderState, 0, 0, panelW, panelH);
+				if (srgb) glEnable(kFramebufferSrgbExt);
+				DoomVR_EndPanel();
+			}
+#ifdef __ANDROID__
+			::DoomVR_PerfAdd(4, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - panelT0).count());
+#endif
+		}
+		twod->Clear();
+
+		// The window: a standalone headset has no monitor and its window is
+		// never swapped while the session runs (gles_framebuffer.cpp), so the
+		// eye's picture is not drawn to it either - a full-window draw a frame
+		// for nothing. The desk emulator (no runtime, flat) still shows it.
+#ifndef __ANDROID__
+		CopyToBackbuffer(nullptr, true);
+#else
+		twod->Clear();
+#endif
+
+		DoomVR_EndFrame();
+		return;
+	}
 	CopyToBackbuffer(nullptr, true);
 }
 

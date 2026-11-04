@@ -119,6 +119,7 @@
 #include "wipe.h"
 #include "zwidget/window/window.h"
 #include "doomvr_headset.h"
+#include <chrono>
 
 // DoomVR: -shaderlog - every shader named and timed in the log (gl_shader.cpp).
 bool gDoomVRShaderLog = false;
@@ -1505,12 +1506,30 @@ void D_DoomLoop ()
 			}
 			I_SetFrameTime();
 
+#ifdef __ANDROID__
+			// DoomVR: where a standalone headset's frame goes, for the
+			// performance line in its log (doomvr_headset.cpp).
+			void DoomVR_PerfAdd(int slot, double ms);
+			auto perfNow = []() { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count(); };
+			double perfT = perfNow();
+			auto perfMark = [&](int slot) { const double t = perfNow(); DoomVR_PerfAdd(slot, t - perfT); perfT = t; };
+			TryRunTics (); // will run at least one tic
+			perfMark(0);
+			I_StartTic ();
+			D_ProcessEvents();
+			perfMark(1);
+			D_Display ();
+			perfMark(2);
+			S_UpdateMusic();
+			perfMark(3);
+#else
 			TryRunTics (); // will run at least one tic
 			// Update display, next frame, with current state.
 			I_StartTic ();
 			D_ProcessEvents();
 			D_Display ();
 			S_UpdateMusic();
+#endif
 
 			if (gameloop_abort)
 			{

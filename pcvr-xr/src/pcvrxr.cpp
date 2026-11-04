@@ -24,6 +24,7 @@ namespace pcvrxr {
 //    cannot load into it.
 // Both say so in the log.
 
+#ifndef __ANDROID__
 static bool FileExists(const std::wstring& p) {
     const DWORD a = GetFileAttributesW(p.c_str());
     return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
@@ -102,12 +103,19 @@ void Session::Impl::PickRuntime() {
     Log("pcvr-xr: SteamVR is running - using it for this launch (%s); the system's runtime setting is unchanged", Narrow(json).c_str());
 }
 
+#else
+// Android: the Khronos loader finds the headset's runtime through its broker;
+// there is no runtime to pick and no environment to set.
+void Session::Impl::PickRuntime() {}
+#endif
+
 // ---------------------------------------------------------------------------
 
 bool Session::Impl::CreateInstance() {
     PickRuntime();
     // The port's extra API layer: its folder on the loader's layer path,
     // before anything asks the loader for layers.
+#ifndef __ANDROID__
     if (!cfg.apiLayerDir.empty() && !cfg.apiLayerName.empty()) {
         std::wstring dir = Widen(cfg.apiLayerDir);
         wchar_t old[4096] = {};
@@ -115,6 +123,33 @@ bool Session::Impl::CreateInstance() {
         if (n > 0 && n < 4096) dir = std::wstring(old) + L";" + dir;
         SetEnvironmentVariableW(L"XR_API_LAYER_PATH", dir.c_str());
     }
+#else
+    // Before anything else on Android: the loader must be told the app's VM
+    // and activity, or every call below answers XR_ERROR_RUNTIME_UNAVAILABLE.
+    {
+        PFN_xrInitializeLoaderKHR initLoader = nullptr;
+        xrGetInstanceProcAddr(XR_NULL_HANDLE, "xrInitializeLoaderKHR", (PFN_xrVoidFunction*)&initLoader);
+        if (initLoader == nullptr) {
+            failure = "this OpenXR loader has no xrInitializeLoaderKHR";
+            Log("pcvr-xr: %s", failure.c_str());
+            return false;
+        }
+        if (cfg.androidVM == nullptr || cfg.androidActivity == nullptr) {
+            failure = "the port gave no JavaVM and activity (Config::androidVM / androidActivity)";
+            Log("pcvr-xr: %s", failure.c_str());
+            return false;
+        }
+        XrLoaderInitInfoAndroidKHR li{ XR_TYPE_LOADER_INIT_INFO_ANDROID_KHR };
+        li.applicationVM = cfg.androidVM;
+        li.applicationContext = cfg.androidActivity;
+        const XrResult ir = initLoader((const XrLoaderInitInfoBaseHeaderKHR*)&li);
+        if (XR_FAILED(ir)) {
+            failure = "xrInitializeLoaderKHR failed";
+            Log("pcvr-xr: %s (%d)", failure.c_str(), (int)ir);
+            return false;
+        }
+    }
+#endif
     uint32_t count = 0;
     // The loader answers this itself when it cannot find or load a runtime,
     // and an empty list would otherwise be reported below as "does not
@@ -129,14 +164,25 @@ bool Session::Impl::CreateInstance() {
     }
     std::vector<XrExtensionProperties> props(count, { XR_TYPE_EXTENSION_PROPERTIES });
     xrEnumerateInstanceExtensionProperties(nullptr, count, &count, props.data());
+#ifdef __ANDROID__
+    {
+        std::string all;
+        for (const auto& p : props) { if (!all.empty()) all += " "; all += p.extensionName; }
+        Log("pcvr-xr: the runtime's %u extensions: %s", count, all.c_str());
+    }
+#endif
 
     auto has = [&props](const char* name) {
         for (const auto& p : props) if (strcmp(p.extensionName, name) == 0) return true;
         return false;
     };
 
+#ifdef PCVRXR_D3D11
     const char* graphicsExt = IsD3D() ? XR_KHR_D3D11_ENABLE_EXTENSION_NAME
-                                      : XR_KHR_OPENGL_ENABLE_EXTENSION_NAME;
+                                      : PCVRXR_GL_EXTENSION_NAME;
+#else
+    const char* graphicsExt = PCVRXR_GL_EXTENSION_NAME;
+#endif
     if (!has(graphicsExt)) {
         failure = IsD3D() ? "this runtime does not support Direct3D 11"
                           : "this runtime does not support OpenGL";
@@ -153,6 +199,23 @@ bool Session::Impl::CreateInstance() {
 
     haveRefreshRate = has("XR_FB_display_refresh_rate");
     if (haveRefreshRate) exts.push_back("XR_FB_display_refresh_rate");
+
+    // The compositor's own supersampling and sharpening, when the port asks
+    // for them and the runtime has them.
+    haveLayerSettings = cfg.compositorQuality && has("XR_FB_composition_layer_settings");
+    if (haveLayerSettings) exts.push_back("XR_FB_composition_layer_settings");
+    else if (cfg.compositorQuality) Log("pcvr-xr: this runtime has no XR_FB_composition_layer_settings - no compositor supersampling or sharpening");
+
+#ifdef __ANDROID__
+    // A standalone headset runs an app at its lowest clocks and leaves its
+    // threads to the system's scheduler until the app says otherwise. Every
+    // native headset app asks for both; without them the game's one thread
+    // (game and render) sat on whatever core and clock it got.
+    havePerfSettings = has("XR_EXT_performance_settings");
+    if (havePerfSettings) exts.push_back("XR_EXT_performance_settings");
+    haveThreadSettings = has("XR_KHR_android_thread_settings");
+    if (haveThreadSettings) exts.push_back("XR_KHR_android_thread_settings");
+#endif
 
     // The Steam Frame's own controller profile, where the runtime has it
     // (SteamVR 2.17.10+). Not in the Khronos registry, so never assumed.
@@ -173,6 +236,12 @@ bool Session::Impl::CreateInstance() {
     ci.enabledExtensionNames = exts.data();
     snprintf(ci.applicationInfo.applicationName, XR_MAX_APPLICATION_NAME_SIZE, "%s", cfg.appName.c_str());
     ci.applicationInfo.apiVersion = XR_CURRENT_API_VERSION;
+#ifdef __ANDROID__
+    XrInstanceCreateInfoAndroidKHR aci{ XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR };
+    aci.applicationVM = cfg.androidVM;
+    aci.applicationActivity = cfg.androidActivity;
+    ci.next = &aci;
+#endif
 
     // The port's extra API layer, when the loader can see it.
     const char* layerName = cfg.apiLayerName.c_str();
@@ -204,6 +273,8 @@ bool Session::Impl::CreateInstance() {
         xrGetInstanceProcAddr(instance, "xrGetDisplayRefreshRateFB", &pfnGetDisplayRefreshRate);
         xrGetInstanceProcAddr(instance, "xrRequestDisplayRefreshRateFB", &pfnRequestDisplayRefreshRate);
     }
+    if (havePerfSettings) xrGetInstanceProcAddr(instance, "xrPerfSettingsSetPerformanceLevelEXT", &pfnSetPerfLevel);
+    if (haveThreadSettings) xrGetInstanceProcAddr(instance, "xrSetAndroidApplicationThreadKHR", &pfnSetAndroidThread);
 
     XrInstanceProperties ip{ XR_TYPE_INSTANCE_PROPERTIES };
     if (XR_SUCCEEDED(xrGetInstanceProperties(instance, &ip))) {
@@ -249,6 +320,7 @@ bool Session::Impl::CreateInstance() {
 }
 
 bool Session::Impl::CreateSession() {
+#ifdef PCVRXR_D3D11
     if (IsD3D()) {
         // Also mandatory before the session, and here the answer matters: the
         // runtime names the GPU the headset is driven from, and a device on a
@@ -287,7 +359,83 @@ bool Session::Impl::CreateSession() {
         ci.systemId = system;
         return Check(xrCreateSession(instance, &ci, &session), "xrCreateSession");
     }
+#endif
 
+#ifdef __ANDROID__
+    // The graphics requirements call must be made before creating a session,
+    // even when its answer is ignored: runtimes fail the session otherwise.
+    PFN_xrGetOpenGLESGraphicsRequirementsKHR getReq = nullptr;
+    xrGetInstanceProcAddr(instance, "xrGetOpenGLESGraphicsRequirementsKHR",
+                          (PFN_xrVoidFunction*)&getReq);
+    if (getReq != nullptr) {
+        XrGraphicsRequirementsOpenGLESKHR req{ XR_TYPE_GRAPHICS_REQUIREMENTS_OPENGL_ES_KHR };
+        getReq(instance, system, &req);
+        Log("pcvr-xr: runtime wants OpenGL ES %d.%d - %d.%d",
+            (int)XR_VERSION_MAJOR(req.minApiVersionSupported),
+            (int)XR_VERSION_MINOR(req.minApiVersionSupported),
+            (int)XR_VERSION_MAJOR(req.maxApiVersionSupported),
+            (int)XR_VERSION_MINOR(req.maxApiVersionSupported));
+    }
+
+    EGLDisplay display = eglGetCurrentDisplay();
+    EGLContext context = eglGetCurrentContext();
+    if (display == EGL_NO_DISPLAY || context == EGL_NO_CONTEXT) {
+        failure = "no current OpenGL ES context on this thread";
+        Log("pcvr-xr: %s - BringUp must be called where the context is current", failure.c_str());
+        return false;
+    }
+    // The runtime wants the context's EGLConfig too. EGL does not hand it
+    // back directly: ask the context for its config id, then for the config
+    // with that id.
+    EGLint configId = 0;
+    eglQueryContext(display, context, EGL_CONFIG_ID, &configId);
+    EGLConfig config = nullptr;
+    EGLint configCount = 0;
+    const EGLint attribs[] = { EGL_CONFIG_ID, configId, EGL_NONE };
+    eglChooseConfig(display, attribs, &config, 1, &configCount);
+    if (configCount < 1 || config == nullptr) {
+        failure = "the current EGL context's config could not be found";
+        Log("pcvr-xr: %s (config id %d)", failure.c_str(), (int)configId);
+        return false;
+    }
+    Log("pcvr-xr: EGL display %p, context %p, config id %d; GL_VERSION %s",
+        (void*)display, (void*)context, (int)configId, (const char*)glGetString(GL_VERSION));
+
+    XrGraphicsBindingOpenGLESAndroidKHR binding{ XR_TYPE_GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR };
+    binding.display = display;
+    binding.config = config;
+    binding.context = context;
+
+    XrSessionCreateInfo ci{ XR_TYPE_SESSION_CREATE_INFO };
+    ci.next = &binding;
+    ci.systemId = system;
+    if (!Check(xrCreateSession(instance, &ci, &session), "xrCreateSession")) return false;
+
+    // The headset's sustained-high clocks for the CPU and the GPU (the level
+    // meant for a game's whole run, not the short boost), and this thread -
+    // the one the port renders on, which in every port so far is also its
+    // game thread - registered as the renderer's main thread, so the runtime
+    // schedules it on a big core at priority. Logged either way: a log that
+    // lacks these two lines explains a slow headset by itself.
+    if (havePerfSettings && pfnSetPerfLevel != nullptr) {
+        auto fn = (PFN_xrPerfSettingsSetPerformanceLevelEXT)pfnSetPerfLevel;
+        const XrResult cpu = fn(session, XR_PERF_SETTINGS_DOMAIN_CPU_EXT, XR_PERF_SETTINGS_LEVEL_SUSTAINED_HIGH_EXT);
+        const XrResult gpu = fn(session, XR_PERF_SETTINGS_DOMAIN_GPU_EXT, XR_PERF_SETTINGS_LEVEL_SUSTAINED_HIGH_EXT);
+        Log("pcvr-xr: performance level sustained high: CPU %s, GPU %s",
+            XR_SUCCEEDED(cpu) ? "accepted" : "refused", XR_SUCCEEDED(gpu) ? "accepted" : "refused");
+    } else {
+        Log("pcvr-xr: this runtime has no XR_EXT_performance_settings - the headset's clocks stay as they are");
+    }
+    if (haveThreadSettings && pfnSetAndroidThread != nullptr) {
+        auto fn = (PFN_xrSetAndroidApplicationThreadKHR)pfnSetAndroidThread;
+        const XrResult r = fn(session, XR_ANDROID_THREAD_TYPE_RENDERER_MAIN_KHR, (uint32_t)gettid());
+        Log("pcvr-xr: this thread (%d) registered as the renderer's main thread: %s", (int)gettid(),
+            XR_SUCCEEDED(r) ? "accepted" : "refused");
+    } else {
+        Log("pcvr-xr: this runtime has no XR_KHR_android_thread_settings - the render thread is scheduled like any other");
+    }
+    return true;
+#else
     // The graphics requirements call must be made before creating a session,
     // even when its answer is ignored: runtimes fail the session otherwise.
     PFN_xrGetOpenGLGraphicsRequirementsKHR getReq = nullptr;
@@ -319,11 +467,13 @@ bool Session::Impl::CreateSession() {
     ci.next = &binding;
     ci.systemId = system;
     return Check(xrCreateSession(instance, &ci, &session), "xrCreateSession");
+#endif
 }
 
 bool Session::Impl::CreateSwapchains() {
     eyeCount = 2;
 
+#ifdef PCVRXR_D3D11
     if (IsD3D()) {
         uint32_t n = 0;
         xrEnumerateSwapchainFormats(session, 0, &n, nullptr);
@@ -372,6 +522,7 @@ bool Session::Impl::CreateSwapchains() {
         projViews.assign(eyeCount, { XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW });
         return true;
     }
+#endif
 
     uint32_t formatCount = 0;
     xrEnumerateSwapchainFormats(session, 0, &formatCount, nullptr);
@@ -401,7 +552,7 @@ bool Session::Impl::CreateSwapchains() {
 
         uint32_t imageCount = 0;
         xrEnumerateSwapchainImages(eye.swapchain, 0, &imageCount, nullptr);
-        eye.images.assign(imageCount, { XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_KHR });
+        eye.images.assign(imageCount, { PCVRXR_SWAPCHAIN_IMAGE_GL_TYPE });
         xrEnumerateSwapchainImages(eye.swapchain, imageCount, &imageCount,
             (XrSwapchainImageBaseHeader*)eye.images.data());
 
@@ -593,6 +744,7 @@ bool Session::BringUp(const Config& cfg) {
     m->failure.clear();
     m->useSceneTarget = cfg.renderToOwnTarget;
 
+#ifdef PCVRXR_D3D11
     if (m->IsD3D()) {
         m->d3dDevice = (ID3D11Device*)cfg.d3d11Device;
         if (m->d3dDevice == nullptr) {
@@ -608,6 +760,7 @@ bool Session::BringUp(const Config& cfg) {
         m->Log("pcvr-xr: up - %s, eye buffer %dx%d (D3D11)", m->runtimeName.c_str(), m->eyeW, m->eyeH);
         return true;
     }
+#endif
 
     // The graphics functions, and the context behind them, are needed only
     // from here. Connect() deliberately asks for neither.
@@ -968,7 +1121,7 @@ void Session::BeginEye(int eye) {
     // accepting no colour at all: the binding still reads back correctly, a
     // clear still works because it is not a draw, and every triangle after it
     // goes nowhere. Nothing about that looks like a bug from the outside.
-    glDrawBuffer(GL_COLOR_ATTACHMENT0);
+    DrawBuffer0();
     glReadBuffer(GL_COLOR_ATTACHMENT0);
 
     glViewport(0, 0, e.width, e.height);
@@ -1010,7 +1163,7 @@ void Session::EndEye(int eye) {
         // nothing, raises an error nobody is checking, and leaves the
         // compositor showing black.
         glReadBuffer(GL_COLOR_ATTACHMENT0);
-        glDrawBuffer(GL_COLOR_ATTACHMENT0);
+        DrawBuffer0();
 
         /*
             The copy sets its own state.
@@ -1107,6 +1260,7 @@ void Session::EndEye(int eye) {
         One check, and the port is told in a sentence what would otherwise take
         an evening. SwapchainTextures() is how it fixes it.
     */
+#ifndef __ANDROID__
     if (!m->checkedSwapchainTexture) {
         m->checkedSwapchainTexture = true;
         GLint tw = 0, th = 0;
@@ -1121,6 +1275,7 @@ void Session::EndEye(int eye) {
                    e.images[e.index].image, tw, th, e.width, e.height);
         }
     }
+#endif
 }
 
 void Session::EndFrame() {
@@ -1176,6 +1331,20 @@ void Session::EndFrame() {
     panel.size.width = m->panelWidthMetres;
     panel.size.height = m->PanelHeightMetres();
 
+    // The world layer composed with the runtime's quality supersampling and
+    // sharpening (a Quest's compositor does both well; the eye buffer stays
+    // the recommended size, so the game's cost does not change).
+    XrCompositionLayerSettingsFB quality{ XR_TYPE_COMPOSITION_LAYER_SETTINGS_FB };
+    if (m->haveLayerSettings) {
+        quality.layerFlags = XR_COMPOSITION_LAYER_SETTINGS_QUALITY_SUPER_SAMPLING_BIT_FB |
+                             XR_COMPOSITION_LAYER_SETTINGS_QUALITY_SHARPENING_BIT_FB;
+        world.next = &quality;
+        if (!m->layerSettingsLogged) {
+            m->layerSettingsLogged = true;
+            m->Log("pcvr-xr: the world layer asks the compositor for quality supersampling and sharpening");
+        }
+    }
+
     const XrCompositionLayerBaseHeader* layers[2] = {};
     uint32_t layerCount = 0;
     if (m->shouldRender && m->eyesDrawn && !m->suppressWorld)
@@ -1193,6 +1362,7 @@ void Session::EndFrame() {
     if (!m->IsD3D()) m->gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
+#ifdef PCVRXR_D3D11
 // ---------------------------------------------------------------------------
 // D3D11: the port renders each eye itself and hands over a finished texture.
 // ---------------------------------------------------------------------------
@@ -1453,6 +1623,14 @@ void Session::SubmitFrame(uint64_t ticket, void* eye0, void* eye1, void* panel) 
     }
     r.ticket = 0;   // spent
 }
+#else
+// No Direct3D here: the D3D-only entry points answer honestly.
+bool Session::SubmitEyeTexture(int, void*) { return false; }
+bool Session::SubmitPanelTexture(void*) { return false; }
+uint64_t Session::WaitFrame() { return 0; }
+bool Session::FrameWillRender(uint64_t) const { return false; }
+void Session::SubmitFrame(uint64_t, void*, void*, void*) {}
+#endif
 
 void Session::Impl::DumpEye(int e) {
     std::vector<uint8_t> px((size_t)eyeW * eyeH * 3);
@@ -1492,14 +1670,27 @@ void Session::Impl::DumpEye(int e) {
     }
 
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
+#ifdef __ANDROID__
+    {
+        // OpenGL ES reads back RGBA only; the dump stays RGB.
+        std::vector<uint8_t> rgba((size_t)eyeW * eyeH * 4);
+        glReadPixels(0, 0, eyeW, eyeH, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+        for (size_t i = 0, n = (size_t)eyeW * eyeH; i < n; ++i) {
+            px[i * 3 + 0] = rgba[i * 4 + 0];
+            px[i * 3 + 1] = rgba[i * 4 + 1];
+            px[i * 3 + 2] = rgba[i * 4 + 2];
+        }
+    }
+#else
     glReadPixels(0, 0, eyeW, eyeH, GL_RGB, GL_UNSIGNED_BYTE, px.data());
+#endif
     // Put the draw target back: a diagnostic that changes the state the caller
     // is drawing in stops being a diagnostic.
     gl.BindFramebuffer(GL_READ_FRAMEBUFFER, 0);
     gl.BindFramebuffer(GL_FRAMEBUFFER, eyes[e].fbos[eyes[e].index]);
 
     char path[512];
-    snprintf(path, sizeof(path), "%s\\eye%d_%03d.ppm", dumpDir.c_str(), e, dumpIndex);
+    snprintf(path, sizeof(path), "%s" PCVRXR_SEP "eye%d_%03d.ppm", dumpDir.c_str(), e, dumpIndex);
     FILE* f = fopen(path, "wb");
     if (f != nullptr) {
         fprintf(f, "P6\n%d %d\n255\n", eyeW, eyeH);
@@ -1593,9 +1784,11 @@ void Session::Shutdown() {
     // owns. Out of order leaves threads alive and the process outlives its
     // window with nothing on screen and nothing in Task Manager to kill.
     if (m->session != XR_NULL_HANDLE) { xrDestroySession(m->session); m->session = XR_NULL_HANDLE; }
+#ifdef PCVRXR_D3D11
     for (int e = 0; e < 2; ++e) m->eyes[e].d3dImages.clear();
     m->panelD3DImages.clear();
     if (m->d3dContext != nullptr) { m->d3dContext->Release(); m->d3dContext = nullptr; }
+#endif
     if (m->instance != XR_NULL_HANDLE) {
         xrDestroyInstance(m->instance);
         m->instance = XR_NULL_HANDLE;

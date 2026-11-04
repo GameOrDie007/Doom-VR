@@ -200,12 +200,26 @@ namespace Priv
 		if (gl_debug)
 			SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
 
+#ifdef __ANDROID__
+		// DoomVR: on a standalone headset the context is OpenGL ES 3, which
+		// the OpenXR runtime's swapchains (sRGB images) and the layer's
+		// framebuffer blits need; the engine's GLES renderer runs on it.
+		if (true)
+		{
+			// 3.0 asked for: a driver hands back the newest ES 3.x it has (3.2 on
+			// the Quest 3), and the desk emulator has no 3.1 config to give.
+			SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+			SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+			SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+		}
+#else
 		if (gl_es)
 		{
 			SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
 			SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
 			SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 		}
+#endif
 		else if (glver[0] > 2)
 		{
 			SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
@@ -415,12 +429,17 @@ DFrameBuffer *SDLVideo::CreateFrameBuffer ()
 
 	if (fb == nullptr)
 	{
+#if defined(__ANDROID__) && defined(HAVE_GLES2)
+		// DoomVR: a standalone headset has only OpenGL ES.
+		fb = new OpenGLESRenderer::OpenGLFrameBuffer(0, vid_fullscreen);
+#else
 #ifdef HAVE_GLES2
 		if (vid_preferbackend != BACKEND_OPENGL)
 			fb = new OpenGLESRenderer::OpenGLFrameBuffer(0, vid_fullscreen);
 		else
 #endif
 			fb = new OpenGLRenderer::OpenGLFrameBuffer(0, vid_fullscreen);
+#endif
 	}
 
 	return fb;

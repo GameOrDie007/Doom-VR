@@ -43,6 +43,10 @@ int DoomVR_HandsToDraw(AActor** fist);
 #include "texturemanager.h"
 #include "actorinlines.h"
 #include "g_levellocals.h"
+#ifdef __ANDROID__
+#include <chrono>
+void DoomVR_PerfAdd(int slot, double ms);	// doomvr_headset.cpp: the headset's performance line
+#endif
 
 EXTERN_CVAR(Float, r_visibility)
 EXTERN_CVAR(Float, vr_crosshair_size)
@@ -921,6 +925,14 @@ void HWDrawInfo::DrawCoronas(FRenderState& state)
 void HWDrawInfo::EndDrawScene(sector_t * viewsector, FRenderState &state)
 {
 	state.EnableFog(false);
+#ifdef __ANDROID__
+	// DoomVR: a standalone headset's performance line splits this pass.
+	auto perfNow = []() { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count(); };
+	double perfT = perfNow();
+	auto perfMark = [&](int slot) { const double t = perfNow(); ::DoomVR_PerfAdd(slot, t - perfT); perfT = t; };
+#else
+	auto perfMark = [](int) {};
+#endif
 
 	// DoomVR: the red dot crosshair - drawn in the world through this eye's
 	// own view, here in the scene pass while the scene's own depth is still
@@ -981,6 +993,7 @@ void HWDrawInfo::EndDrawScene(sector_t * viewsector, FRenderState &state)
 						const FVector3 q = p + right * (cosf(a) * radius) + up * (sinf(a) * radius);
 						v.first[i + 1].Set(q.X, q.Y, q.Z, 0.f, 0.f);
 					}
+					screen->mVertexData->UploadLate(v.second, kSegs + 2);
 					state.Draw(DT_TriangleFan, v.second, kSegs + 2);
 				};
 				// Tested against the scene's depth but not written to it: the rim
@@ -1006,6 +1019,7 @@ void HWDrawInfo::EndDrawScene(sector_t * viewsector, FRenderState &state)
 		DrawCoronas(state);
 	}*/
 
+	perfMark(12);	// the dot
 	// [BB] HUD models need to be rendered here.
 	const bool renderHUDModel = IsHUDModelForPlayerAvailable(players[consoleplayer].camera->player);
 	// DoomVR: Game Or Die Hands, drawn with the gun, over the world.
@@ -1021,13 +1035,18 @@ void HWDrawInfo::EndDrawScene(sector_t * viewsector, FRenderState &state)
 			DrawPlayerSprites(true, state);
 			screen->mBones->Unmap();
 		}
+		perfMark(13);	// the 3D guns
 		if (vrHandBits) DrawVRHands(state, vrHandBits, vrFist);
+		perfMark(14);	// the hands
 	}
 	// DoomVR: the wrist HUD (physical play), on the other hand's wrist.
 	DrawVRWrist(state);
+	perfMark(15);
 	DrawVRHolsters(state);
+	perfMark(16);
 	// DoomVR: the weapon wheel, over everything.
 	DrawVRWheel(state);
+	perfMark(17);
 
 	state.EnableStencil(false);
 	state.SetViewport(screen->mScreenViewport.left, screen->mScreenViewport.top, screen->mScreenViewport.width, screen->mScreenViewport.height);
@@ -1041,6 +1060,13 @@ void HWDrawInfo::EndDrawScene(sector_t * viewsector, FRenderState &state)
 
 void HWDrawInfo::DrawEndScene2D(sector_t * viewsector, FRenderState &state)
 {
+#ifdef __ANDROID__
+	auto perfNow = []() { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count(); };
+	double perfT = perfNow();
+	auto perfMark = [&](int slot) { const double t = perfNow(); ::DoomVR_PerfAdd(slot, t - perfT); perfT = t; };
+#else
+	auto perfMark = [](int) {};
+#endif
 	const bool renderHUDModel = IsHUDModelForPlayerAvailable(players[consoleplayer].camera->player);
 	auto vrmode = VRMode::GetVRMode(true);
 
@@ -1079,6 +1105,7 @@ void HWDrawInfo::DrawEndScene2D(sector_t * viewsector, FRenderState &state)
 		DrawPlayerSprites(false, state, 1);
 		screen->mViewpoints->SetViewpoint(state, &vp);
 	}
+	perfMark(18);	// the weapon sprites
 
 	// DoomVR: the screen blend - a hit's red, a pickup's flash, the radiation
 	// suit's green - over the whole of this eye, in front of the weapon as on
@@ -1106,6 +1133,7 @@ void HWDrawInfo::DrawEndScene2D(sector_t * viewsector, FRenderState &state)
 				v.first[1].Set(1.f, 0.f, 0.f, 1.f, 0.f);
 				v.first[2].Set(0.f, 1.f, 0.f, 0.f, 1.f);
 				v.first[3].Set(1.f, 1.f, 0.f, 1.f, 1.f);
+				screen->mVertexData->UploadLate(v.second, 4);
 				state.Draw(DT_TriangleStrip, v.second, 4);
 			};
 			if (modulateColor != 0xffffffff)
@@ -1142,6 +1170,7 @@ void HWDrawInfo::DrawEndScene2D(sector_t * viewsector, FRenderState &state)
 		v.first[1].Set(1.f, 0.f, 0.f, 1.f, 0.f);
 		v.first[2].Set(0.f, 1.f, 0.f, 0.f, 1.f);
 		v.first[3].Set(1.f, 1.f, 0.f, 1.f, 1.f);
+		screen->mVertexData->UploadLate(v.second, 4);
 		state.Draw(DT_TriangleStrip, v.second, 4);
 		state.EnableTexture(true);
 	}
@@ -1181,6 +1210,7 @@ void HWDrawInfo::DrawEndScene2D(sector_t * viewsector, FRenderState &state)
 					v.first[2 * i].Set(c * t0, s * t0, -kDist, 0.f, 0.f);
 					v.first[2 * i + 1].Set(c * t1, s * t1, -kDist, 0.f, 0.f);
 				}
+				screen->mVertexData->UploadLate(v.second, 2 * (kSegs + 1));
 				state.Draw(DT_TriangleStrip, v.second, 2 * (kSegs + 1));
 			};
 			for (int k = 0; k < kRings; ++k)
@@ -1192,6 +1222,7 @@ void HWDrawInfo::DrawEndScene2D(sector_t * viewsector, FRenderState &state)
 	}
 
 	state.SetNoSoftLightLevel();
+	perfMark(19);	// the blend, the fade, the vignette
 
 	// Restore standard rendering state
 	state.SetRenderStyle(STYLE_Translucent);

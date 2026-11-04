@@ -133,8 +133,27 @@ void GLBuffer::Upload(size_t start, size_t size)
 	{
 		Bind();
 
-		if(size)
+		if (size)
+		{
+			// DoomVR: the range is fresh within this frame (the vertex buffer is
+			// filled front to back and reset only when its pipeline slot comes
+			// round again, fenced), so the GPU reads nothing of it yet: write it
+			// unsynchronized and the driver has no draw to wait for. A sub-data
+			// upload into a buffer with draws in flight made the Quest 3 stall
+			// on the first late fill of each frame (the crosshair dot's slot:
+			// 2.7-7.9 ms) and on every translucent object's upload.
+			if (gles.unsyncUploads)
+			{
+				void* dst = glMapBufferRange(mUseType, start, size, GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT);
+				if (dst)
+				{
+					memcpy(dst, memory + start, size);
+					glUnmapBuffer(mUseType);
+					return;
+				}
+			}
 			glBufferSubData(mUseType, start, size, memory + start);
+		}
 	}
 }
 
@@ -165,7 +184,12 @@ void GLBuffer::Unmap()
 void *GLBuffer::Lock(unsigned int size)
 {
 	// This initializes this buffer as a static object with no data.
-	SetData(size, nullptr, BufferUsageType::Mappable);
+	// DoomVR: a buffer written every frame (the hands' posed vertices) kept
+	// freeing and reallocating its CPU copy and respecifying the GL buffer
+	// empty on each lock; with the size unchanged the copy is kept and only
+	// Unlock's upload remains.
+	const bool keep = (isData || !gles.useMappedBuffers) && memory != nullptr && buffersize == size;
+	if (!keep) SetData(size, nullptr, BufferUsageType::Mappable);
 	if (!isData && gles.useMappedBuffers)
 	{
 		return glMapBufferRange(mUseType, 0, size, GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT | GL_MAP_UNSYNCHRONIZED_BIT);
@@ -223,7 +247,7 @@ void GLBuffer::Resize(size_t newsize)
 
 void GLBuffer::GPUDropSync()
 {
-	if (gles.glesMode > GLES_MODE_GLES && gles.useMappedBuffers && glFenceSync && glDeleteSync)
+	if (((gles.glesMode > GLES_MODE_GLES && gles.useMappedBuffers) || gles.unsyncUploads) && glFenceSync && glDeleteSync)
 	{
 		if (mGLSync != NULL)
 		{
@@ -236,8 +260,9 @@ void GLBuffer::GPUDropSync()
 
 void GLBuffer::GPUWaitSync()
 {
-	if (gles.glesMode > GLES_MODE_GLES && gles.useMappedBuffers && glDeleteSync && glClientWaitSync)
+	if (((gles.glesMode > GLES_MODE_GLES && gles.useMappedBuffers) || gles.unsyncUploads) && glDeleteSync && glClientWaitSync)
 	{
+		if (mGLSync == NULL) return;	// DoomVR: the first turns of the pipeline have no fence yet
 		GLenum status = glClientWaitSync(mGLSync, GL_SYNC_FLUSH_COMMANDS_BIT, 1000 * 1000 * 50); // Wait for a max of 50ms...
 
 		if (status != GL_ALREADY_SIGNALED && status != GL_CONDITION_SATISFIED)

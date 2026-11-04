@@ -98,6 +98,11 @@ elseif(NOT ("vcpkg-libsndfile" IN_LIST VCPKG_MANIFEST_FEATURES))
 	find_package(MPG123)
 
 	if(MPG123_FOUND)
+		# mpg123's own CMake package (the Android build links its static copy)
+		# names its target MPG123::libmpg123; the Find module here names it mpg123.
+		if(TARGET MPG123::libmpg123 AND NOT TARGET mpg123)
+			add_library(mpg123 ALIAS MPG123::libmpg123)
+		endif()
 		target_compile_definitions(zmusic-obj INTERFACE HAVE_MPG123)
 		target_link_libraries(zmusic-obj INTERFACE mpg123)
 		determine_package_config_dependency(ZMUSIC_PACKAGE_DEPENDENCIES TARGET mpg123 MODULE MPG123)
@@ -174,9 +179,19 @@ set_target_properties(zmusic zmusiclite
 PROPERTIES
 	MACOSX_RPATH ON
 	PUBLIC_HEADER ${CMAKE_CURRENT_SOURCE_DIR}/../include/zmusic.h
-	VERSION ${PROJECT_VERSION}
-	SOVERSION ${PROJECT_VERSION_MAJOR}
 )
+# Android (Doom VR's standalone build) loads libraries out of an APK, where a
+# file must be named lib*.so and nothing else: no version in the name and no
+# soname, so the game asks for plain libzmusic.so.
+if(NOT ANDROID)
+	set_target_properties(zmusic zmusiclite
+	PROPERTIES
+		VERSION ${PROJECT_VERSION}
+		SOVERSION ${PROJECT_VERSION_MAJOR}
+	)
+else()
+	set_target_properties(zmusic zmusiclite PROPERTIES NO_SONAME ON)
+endif()
 
 if (VCPKG_TOOLCHAIN)
 	x_vcpkg_install_local_dependencies(TARGETS zmusic zmusiclite DESTINATION ".")

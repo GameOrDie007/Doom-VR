@@ -1240,12 +1240,16 @@ namespace
 		state.mModelMatrix = world;
 		state.EnableModelMatrix(true);
 
+		// Every vertex filled in this pass comes after the scene's own upload:
+		// UploadLate sends it (the OpenGL ES renderer drew stale buffer data
+		// here - small black shapes about the wrist on a Quest 3).
 		auto quad = [&](float x0, float y0, float x1, float y1) {
 			auto v = screen->mVertexData->AllocVertices(4);
 			v.first[0].Set(x0, y1, 0, 0, 0);
 			v.first[1].Set(x0, y0, 0, 0, 1);
 			v.first[2].Set(x1, y1, 0, 1, 0);
 			v.first[3].Set(x1, y0, 0, 1, 1);
+			screen->mVertexData->UploadLate(v.second, 4);
 			state.Draw(DT_TriangleStrip, v.second, 4);
 		};
 
@@ -1262,6 +1266,7 @@ namespace
 				const float ca = cosf(th) * h->capRa * 0.92f, sb = sinf(th) * h->capRb * 0.92f;
 				v.first[i + 1].Set(ca * ax + sb * bx, ca * ay + sb * by, 0, 0, 0);
 			}
+			screen->mVertexData->UploadLate(v.second, kSeg + 2);
 			state.EnableTexture(false);
 			state.SetColor(0.02f, 0.025f, 0.03f, 0.88f * alpha);
 			state.Draw(DT_TriangleFan, v.second, kSeg + 2);
@@ -1417,6 +1422,7 @@ void HWDrawInfo::DrawVRWrist(FRenderState& state)
 		v.first[1].Set(b.X, b.Y, b.Z, s0, t1);
 		v.first[2].Set(d.X, d.Y, d.Z, s1, t0);
 		v.first[3].Set(e.X, e.Y, e.Z, s1, t1);
+		screen->mVertexData->UploadLate(v.second, 4);
 		state.Draw(DT_TriangleStrip, v.second, 4);
 	};
 	state.EnableTexture(false);
@@ -1560,6 +1566,7 @@ void HWDrawInfo::DrawVRHolsters(FRenderState& state)
 			v.first[2 * k].Set(c * ro, sn * ro, 0.f, 0, 0);
 			v.first[2 * k + 1].Set(c * ri, sn * ri, 0.f, 0, 0);
 		}
+		screen->mVertexData->UploadLate(v.second, 2 * (seg + 1));
 		state.Draw(DT_TriangleStrip, v.second, 2 * (seg + 1));
 
 		// The label above the ring: the game's own small font, 2 cm tall.
@@ -1585,6 +1592,7 @@ void HWDrawInfo::DrawVRHolsters(FRenderState& state)
 				q.first[1].Set(x, y, 0.f, 0, 1);
 				q.first[2].Set(x + tw, y + th, 0.f, 1, 0);
 				q.first[3].Set(x + tw, y, 0.f, 1, 1);
+				screen->mVertexData->UploadLate(q.second, 4);
 				state.Draw(DT_TriangleStrip, q.second, 4);
 			}
 			x += w * k;
@@ -1757,6 +1765,7 @@ void HWDrawInfo::DrawVRWheel(FRenderState& state)
 			v.first[2 * k].Set(cosf(a) * r1, sinf(a) * r1, z, 0, 0);
 			v.first[2 * k + 1].Set(cosf(a) * r0, sinf(a) * r0, z, 0, 0);
 		}
+		screen->mVertexData->UploadLate(v.second, 2 * (steps + 1));
 		state.Draw(DT_TriangleStrip, v.second, 2 * (steps + 1));
 	};
 	for (int i = 0; i < n; ++i)
@@ -1788,6 +1797,7 @@ void HWDrawInfo::DrawVRWheel(FRenderState& state)
 		v.first[1].Set(b.X, b.Y, z, 0, 1);
 		v.first[2].Set(d.X, d.Y, z, 1, 0);
 		v.first[3].Set(e.X, e.Y, z, 1, 1);
+		screen->mVertexData->UploadLate(v.second, 4);
 		state.Draw(DT_TriangleStrip, v.second, 4);
 	};
 	state.AlphaFunc(Alpha_GEqual, 0.1f);

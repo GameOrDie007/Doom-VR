@@ -161,6 +161,19 @@ public:
 		mVertexBuffer->Upload(mMapStart * sizeof(FFlatVertex), (mCurIndex - mMapStart) * sizeof(FFlatVertex));
 	}
 
+	// DoomVR: vertices allocated and filled after the scene's own Map/Unmap
+	// window (the crosshair dot, the in-scene blend, the wall fade and the
+	// comfort vignette are drawn at the end of the scene) go to the GPU here.
+	// The backends with a mapped buffer have them already and do nothing; the
+	// OpenGL ES one keeps a CPU copy and only sends what Unmap or this names.
+	// Without this call, that renderer drew those vertices from whatever the
+	// buffer held before: on a Quest 3, red and black triangles and lines
+	// flickering over the level wherever the dot was.
+	void UploadLate(unsigned int first, unsigned int count)
+	{
+		mVertexBuffer->Upload(first * sizeof(FFlatVertex), count * sizeof(FFlatVertex));
+	}
+
 	void DropSync()
 	{
 		mVertexBuffer->GPUDropSync();

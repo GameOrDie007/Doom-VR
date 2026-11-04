@@ -114,7 +114,8 @@ Say ("Doom VR setup started " + (Get-Date -Format "yyyy-MM-dd HH:mm:ss") + " fro
 # ProviderPath, not Path: run from a network folder, .Path is
 # "Microsoft.PowerShell.Core\FileSystem::\\server\...", which .NET cannot write to.
 $Install = (Resolve-Path -LiteralPath $Install).ProviderPath
-if (-not (Test-Path (Join-Path $Install "uzdoom.exe"))) { throw "no uzdoom.exe in $Install - run Setup.bat from the Doom VR download" }
+# The headsets' Setup (package\quest\setup-quest.ps1) builds the game folder on this PC with no program in it: the app is the program.
+if (-not (Test-Path (Join-Path $Install "uzdoom.exe")) -and -not $env:DOOMVR_HEADSET_SETUP) { throw "no uzdoom.exe in $Install - run Setup.bat from the Doom VR download" }
 
 # ---------------------------------------------------------------------------
 # The games. Each file is named by the folder it lives in: wads\ for the

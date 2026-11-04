@@ -1,0 +1,10 @@
+{
+    "file_format_version": "1.0.0",
+    "api_layer": {
+        "name": "XR_APILAYER_GAMEORDIE_game_tome",
+        "library_path": "libGameTomeLayer.so",
+        "api_version": "1.0",
+        "implementation_version": "1",
+        "description": "Game Tome: the game's manual as a book in your hand"
+    }
+}

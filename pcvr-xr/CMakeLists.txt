@@ -42,14 +42,27 @@ add_library(pcvrxr STATIC
 target_include_directories(pcvrxr
     PUBLIC  "${CMAKE_CURRENT_SOURCE_DIR}/include"
     PRIVATE "${PCVRXR_OPENXR}/include")
+if(ANDROID)
+    # A standalone headset (Quest 3; the Steam Frame through Lepton): OpenGL ES
+    # through EGL, and the Khronos loader for Android - the .so out of its AAR
+    # for this ABI, named by the port's build (it ships in the APK too).
+    set(PCVRXR_ANDROID_LOADER "" CACHE FILEPATH "libopenxr_loader.so for this ABI (the Khronos OpenXR loader AAR)")
+    if(NOT EXISTS "${PCVRXR_ANDROID_LOADER}")
+        message(FATAL_ERROR "pcvr-xr: PCVRXR_ANDROID_LOADER must name libopenxr_loader.so for ${ANDROID_ABI}")
+    endif()
+    add_library(pcvrxr_openxr_loader SHARED IMPORTED)
+    set_target_properties(pcvrxr_openxr_loader PROPERTIES IMPORTED_LOCATION "${PCVRXR_ANDROID_LOADER}")
+    target_link_libraries(pcvrxr PUBLIC pcvrxr_openxr_loader EGL GLESv3 android log)
+else()
 target_link_libraries(pcvrxr PUBLIC
     "${PCVRXR_OPENXR}/lib/${PCVRXR_ARCH}/openxr_loader.lib"
     opengl32 d3d11 dxgi)
+endif()
 
 # The Unity bridge: a DLL with a flat C ABI, for C# mods of Unity games
 # (Direct3D 11). Built with the static CRT so a player needs no runtime installed.
 option(PCVRXR_UNITY "Build the Unity bridge DLL (pcvrxr_unity.dll)" OFF)
-if(PCVRXR_UNITY)
+if(PCVRXR_UNITY AND NOT ANDROID)
     add_library(pcvrxr_unity SHARED unity/pcvrxr_unity.cpp)
     target_link_libraries(pcvrxr_unity PRIVATE pcvrxr)
     add_custom_command(TARGET pcvrxr_unity POST_BUILD
@@ -59,6 +72,8 @@ if(PCVRXR_UNITY)
 endif()
 
 # The probe: no engine, no game data, no headset required to build it.
+# Windows only: it opens a window of its own.
+if(NOT ANDROID)
 add_executable(probe probe/probe.cpp)
 target_link_libraries(probe PRIVATE pcvrxr)
 
@@ -71,3 +86,4 @@ add_custom_command(TARGET probe POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${PCVRXR_OPENXR}/bin/${PCVRXR_ARCH}/openxr_loader.dll"
         "$<TARGET_FILE_DIR:probe>")
+endif()

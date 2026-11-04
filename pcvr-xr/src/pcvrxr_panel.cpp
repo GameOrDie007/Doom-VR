@@ -45,12 +45,15 @@ bool Session::CreatePanel(const PanelConfig& cfg) {
 
     uint32_t imageCount = 0;
     xrEnumerateSwapchainImages(m->panelSwapchain, 0, &imageCount, nullptr);
+#ifdef PCVRXR_D3D11
     if (m->IsD3D()) {
         m->panelD3DImages.assign(imageCount, { XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR });
         xrEnumerateSwapchainImages(m->panelSwapchain, imageCount, &imageCount,
             (XrSwapchainImageBaseHeader*)m->panelD3DImages.data());
-    } else {
-    m->panelImages.assign(imageCount, { XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_KHR });
+    } else
+#endif
+    {
+    m->panelImages.assign(imageCount, { PCVRXR_SWAPCHAIN_IMAGE_GL_TYPE });
     xrEnumerateSwapchainImages(m->panelSwapchain, imageCount, &imageCount,
         (XrSwapchainImageBaseHeader*)m->panelImages.data());
 
@@ -149,7 +152,10 @@ void Session::BeginPanel() {
     // whatever the last pass left - usually the desktop window's size - and
     // lands in a corner of a texture that is bigger than it expected.
     glViewport(0, 0, m->panelW, m->panelH);
+#ifndef __ANDROID__
+    // OpenGL ES encodes into an sRGB attachment by itself; desktop GL asks.
     glEnable(GL_FRAMEBUFFER_SRGB);
+#endif
 }
 
 void Session::EndPanel() {
@@ -177,8 +183,8 @@ void Session::Impl::DumpPanel() {
     gl.BindFramebuffer(GL_FRAMEBUFFER, panelFbos[panelIndex]);
 
     char path[512], apath[512];
-    snprintf(path, sizeof(path), "%s\\panel_%03d.ppm", dumpDir.c_str(), dumpIndex);
-    snprintf(apath, sizeof(apath), "%s\\panel_%03d_alpha.pgm", dumpDir.c_str(), dumpIndex);
+    snprintf(path, sizeof(path), "%s" PCVRXR_SEP "panel_%03d.ppm", dumpDir.c_str(), dumpIndex);
+    snprintf(apath, sizeof(apath), "%s" PCVRXR_SEP "panel_%03d_alpha.pgm", dumpDir.c_str(), dumpIndex);
     FILE* f = fopen(path, "wb");
     FILE* fa = fopen(apath, "wb");
     if (f != nullptr && fa != nullptr) {
