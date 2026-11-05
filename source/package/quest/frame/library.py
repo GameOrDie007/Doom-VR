@@ -67,6 +67,33 @@ def read_shortcuts(path):
     return {'shortcuts': {}}
 
 
+STRAY = []   # the second roots shortcuts_node merged away
+
+
+def shortcuts_node(root):
+    """The dict of shortcuts, whatever the file spells its root ('shortcuts' or 'Shortcuts': another
+    tool wrote 'Shortcuts' on a player's Frame, our own lower-case root beside it was a second one
+    that Steam never reads, and the game was in no library, 2 Nov 2026).  The spelling the file
+    already uses is kept; any other root of that name is merged into it and dropped."""
+    keys = [k for k in root if k.lower() == 'shortcuts']
+    if not keys:
+        root['shortcuts'] = {}
+        return root['shortcuts']
+    target = next((k for k in keys if k != 'shortcuts'), keys[0])
+    node = root[target]
+    for k in keys:
+        if k == target:
+            continue
+        have = {v.get('appid') for v in node.values() if isinstance(v, dict)}
+        for _, v in sorted(root[k].items(), key=lambda kv: int(kv[0]) if kv[0].isdigit() else 1 << 30):
+            if isinstance(v, dict) and v.get('appid') not in have:
+                node[str(max([int(x) for x in node if x.isdigit()] + [-1]) + 1)] = v
+        del root[k]
+        STRAY.append(k)
+        print('shortcuts.vdf: a second', repr(k), 'root merged into', repr(target))
+    return node
+
+
 def signed(appid):
     return appid - (1 << 32) if appid >= (1 << 31) else appid
 
@@ -123,10 +150,11 @@ def main():
     cfg = os.path.join(a.steam, 'userdata', a.user, 'config')
     sc = os.path.join(cfg, 'shortcuts.vdf')
     root = read_shortcuts(sc)
-    shorts = root.setdefault('shortcuts', {})
+    shorts = shortcuts_node(root)
 
     if a.what == 'has':
-        print('yes' if entries_for(shorts, a.appid) else 'no')
+        # a stray second root is not "there": Steam never read it, so Setup must write the file again
+        print('yes' if entries_for(shorts, a.appid) and not STRAY else 'no')
         return 0
 
     for k in entries_for(shorts, a.appid):
