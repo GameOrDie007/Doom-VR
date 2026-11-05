@@ -448,6 +448,12 @@ function SearchTree([string]$root, [int]$base, [string]$from) {
 if (-not $LinkWads) {
     Get-ChildItem -LiteralPath $wadsDir -File -ErrorAction SilentlyContinue |
         ForEach-Object { Consider $_.FullName -1 "already in wads" }
+    # Where a player would put the games by hand: the Doom VR folder, the game
+    # folder and My WADs. A game found there is copied into wads\ like any other.
+    foreach ($d in (Split-Path -Parent $Install), $Install, (Join-Path $Install "My WADs")) {
+        Get-ChildItem -LiteralPath $d -File -ErrorAction SilentlyContinue |
+            ForEach-Object { Consider $_.FullName 0 "the Doom VR folder" }
+    }
 }
 
 if ($LinkWads) {

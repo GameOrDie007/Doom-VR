@@ -319,6 +319,21 @@ function Find-Doom {
     return $null
 }
 
+# A folder the player chose that holds the original games' WADs, loose or in
+# folders of its own: no DOOM + DOOM II there, so Doom VR goes in Documents, and
+# the game search (game\setup\setup.ps1, to the same depth) copies them from it.
+function Find-OwnWads {
+    $names = 'doom.wad', 'doom2.wad', 'tnt.wad', 'plutonia.wad', 'heretic.wad', 'hexen.wad', 'strife1.wad', 'chex3.wad', 'hacx.wad'
+    foreach ($d in $Dropped) {
+        if (-not $d) { continue }
+        $p = $d.Trim('"')
+        if (-not (Test-Path -LiteralPath $p -PathType Container)) { continue }
+        $hit = Get-ChildItem -LiteralPath $p -File -Recurse -Depth 3 -ErrorAction SilentlyContinue | Where-Object { $names -contains $_.Name.ToLower() } | Select-Object -First 1
+        if ($hit) { return $p }
+    }
+    return $null
+}
+
 # Every VR folder of ours this PC has, from their install manifests.
 function Installed-VRFolders {
     $list = New-Object System.Collections.Generic.List[string]
@@ -987,6 +1002,7 @@ function Look-Status([string] $vr) {
 function Game-Status {
     Search-Roots
     $doom = Find-Doom
+    if (-not $doom) { $doom = Find-OwnWads }
     $vr = $null
     foreach ($f in Installed-VRFolders) { $vr = $f; break }
     $ver = $null
