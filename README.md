@@ -43,7 +43,7 @@ fits come from your PC's Doom VR install, so install the PC version first.
    time, put the headset on and choose Allow.
 3. On the headset: Library, Unknown Sources, **Doom VR**.
 
-By hand: download `Doom-VR-1.1-Quest.zip` from [Releases](../../releases), unzip it on your PC and
+By hand: download `Doom-VR-1.2-Quest.zip` from [Releases](../../releases), unzip it on your PC and
 double-click **Setup.bat**. The headset needs Developer mode, turned on once in the Meta Horizon
 phone app; the download's README walks through it. Run the installer or Setup again after an
 update: it copies only what changed and keeps your saved games and settings.
