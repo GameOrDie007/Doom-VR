@@ -68,6 +68,10 @@ param(
     # voxel gore, the upscaled textures): asked about and waited for, the
     # other one-click mods only listed. "Get the Modern VR look.cmd" runs this.
     [switch]$LookOnly,
+    # Doom VR.cmd asks this at every start: has the player put a game's WADs in
+    # by hand since the last look? Nothing new and it says nothing and stops;
+    # something new and it adds it with no questions and no downloads.
+    [switch]$PickUp,
     # Where the mirrored mods come from, in place of Doom VR's own "mods"
     # release: a test build points this at a local copy (file:///...).
     [string]$Mirror = "",
@@ -103,13 +107,13 @@ function Say([string]$line) {
     $at = "[{0:00}:{1:00}] " -f [math]::Floor($setupClock.Elapsed.TotalMinutes), $setupClock.Elapsed.Seconds
     try { [System.IO.File]::AppendAllText($logPath, $at + $line + "`r`n") } catch { }
 }
-try { [System.IO.File]::WriteAllText($logPath, "") } catch { }
+if (-not $PickUp) { try { [System.IO.File]::WriteAllText($logPath, "") } catch { } }
 trap {
     Say ("SETUP STOPPED: " + $_.Exception.Message)
     Say ("  at " + $_.InvocationInfo.PositionMessage.Split("`n")[0])
     break
 }
-Say ("Doom VR setup started " + (Get-Date -Format "yyyy-MM-dd HH:mm:ss") + " from " + $PSScriptRoot)
+if (-not $PickUp) { Say ("Doom VR setup started " + (Get-Date -Format "yyyy-MM-dd HH:mm:ss") + " from " + $PSScriptRoot) }
 
 # ProviderPath, not Path: run from a network folder, .Path is
 # "Microsoft.PowerShell.Core\FileSystem::\\server\...", which .NET cannot write to.
@@ -374,6 +378,29 @@ foreach ($g in $games) {
 $wantedWads["doom64.wad"] = $true
 
 $wadsDir = if ($LinkWadsCheck) { $LinkWadsCheck } elseif ($LinkWads) { Join-Path $Install $LinkWads } else { Join-Path $Install "wads" }
+
+# The games wads\ held when setup last finished: one written since, or one in a
+# place a player would put it by hand, is new.
+$seenFile = Join-Path $Install "setup\games-seen.txt"
+if ($PickUp) {
+    $seen = @(); if (Test-Path -LiteralPath $seenFile) { $seen = @(Get-Content -LiteralPath $seenFile) }
+    $new = @{}
+    foreach ($d in (Split-Path -Parent $Install), $Install, (Join-Path $Install "My WADs")) {
+        foreach ($f in @(Get-ChildItem -LiteralPath $d -File -ErrorAction SilentlyContinue)) {
+            $n = $f.Name.ToLower()
+            if ($wantedWads.ContainsKey($n) -and -not (Test-Path -LiteralPath (Join-Path $wadsDir $n))) { $new[$n] = $true }
+        }
+    }
+    foreach ($f in @(Get-ChildItem -LiteralPath $wadsDir -File -ErrorAction SilentlyContinue)) {
+        $n = $f.Name.ToLower()
+        if ($wantedWads.ContainsKey($n) -and $seen -notcontains $n) { $new[$n] = $true }
+    }
+    if ($new.Count -eq 0) { exit 0 }
+    try { [System.IO.File]::WriteAllText($logPath, "") } catch { }
+    Say ("Found " + (@($new.Keys | Sort-Object) -join ", ") + ": adding to Doom VR, one moment...")
+    $Unattended = $true
+    $NoDownload = $true
+}
 $kexDir = Join-Path $Install "kex"
 $modsDir = Join-Path $Install "mods"
 $doomceDir = Join-Path $Install "doomce"
@@ -1583,4 +1610,10 @@ if ($missing.Count -gt 0) {
     Say "  Have them somewhere else - an older Doom VR folder, or another Doom port's? Drop that folder onto Setup.bat."
 }
 if ($start) { Say "Ready: $start starts first; Switch Game has the rest." } else { Say "No games found yet - nothing to start." }
+if (-not $LinkWads) {
+    try {
+        $names = @(Get-ChildItem -LiteralPath $wadsDir -File -ErrorAction SilentlyContinue | ForEach-Object { $_.Name.ToLower() } | Where-Object { $wantedWads.ContainsKey($_) })
+        [System.IO.File]::WriteAllLines($seenFile, [string[]]$names)
+    } catch { Say ("Could not note the games found: " + $_.Exception.Message) }
+}
 Say "Setup finished."

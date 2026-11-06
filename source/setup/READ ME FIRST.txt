@@ -33,6 +33,9 @@ INSTALL
        settings. What it did is in setup-log.txt in the VR folder.
     3. Start your VR runtime, then the Doom VR shortcut (or Doom VR.cmd in the
        VR folder). "Doom VR (flat).cmd" plays on the monitor with no headset.
+    Have just the WAD files (DOOM.WAD, DOOM2.WAD, HERETIC.WAD and so on)? Put
+    them in the VR folder, next to Doom VR.cmd, and start Doom VR: they are
+    added by themselves and the games appear in Switch Game.
     Bought another Doom-family game later? Run "Find my new games.cmd" in
     the VR folder. To remove Doom VR, run Uninstall.bat there: your settings
     and saved games are kept, and your games themselves are never touched.

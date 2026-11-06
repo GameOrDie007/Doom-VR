@@ -609,6 +609,8 @@ function Write-Cmd([string] $path, [string] $title, [string] $target) {
         ('rem ' + $title),
         ('rem Made by ' + $ProductFile + ' ' + $Version + ' Setup.'),
         'rem No parenthesised blocks below: a path with "(x86)" in it ends them early.',
+        'rem WADs put in the VR folder, game, game\wads or My WADs by hand are added first.',
+        'powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0game\setup\setup.ps1" -Install "%~dp0game" -PickUp',
         ('if not exist "%~dp0game\' + $target + '" goto missing'),
         ('call "%~dp0game\' + $target + '" %*'),
         'goto :eof',
@@ -821,6 +823,7 @@ function Do-Install {
         Log ('  run "' + $GetLook + '" in the VR folder - it opens the pages and adds each file as it arrives.')
     }
     $Result['modernLook'] = $look
+    Log 'Have the WAD files of a game you own?  Put them in the VR folder: they are added the next time you start Doom VR.'
     Log 'Bought another Doom-family game later?  Run "Find my new games.cmd" in the VR folder.'
     Log 'Uninstall.bat and Collect logs.bat are in the VR folder too.'
     Copy-Item -LiteralPath $LogFile -Destination (Join-Path $vr 'setup-log.txt') -Force
@@ -874,7 +877,7 @@ function Do-Uninstall {
             }
         }
         # What the game wrote that is not the player's: logs, crash reports.
-        foreach ($pat in @('log-*.txt', 'logs\*.txt', 'crash*.txt', '*.dmp')) {
+        foreach ($pat in @('log-*.txt', 'logs\*.txt', 'crash*.txt', '*.dmp', 'setup\games-seen.txt')) {
             Get-ChildItem -Path (Join-Path $game $pat) -File -ErrorAction SilentlyContinue | Remove-Item -Force
         }
         Remove-Empty $vr

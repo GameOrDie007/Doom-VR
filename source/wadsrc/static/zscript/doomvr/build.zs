@@ -61,6 +61,12 @@ class DoomVRBuildMenu : DoomVRGameSelectMenu
 		return CoverFor(cv ? cv.GetString() : "");
 	}
 
+	// This page's rows are parts of a build, not games.
+	override String GameNote(int item)
+	{
+		return "";
+	}
+
 	// A pick changes the highlighted row's text without moving the cursor,
 	// which is when the menu would otherwise pick it up.
 	override void Drawer()

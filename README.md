@@ -15,9 +15,8 @@ built on [UZDoom](https://github.com/UZDoom/UZDoom) 5.0.1.
 3. Start your VR runtime (Virtual Desktop, SteamVR or Quest Link) and press **PRESS START**, or use
    the **Doom VR** shortcut on your desktop. The game picker opens on Doom; pick any game.
 
-**Installing by hand:** download `Doom-VR-1.0.1-PCVR.zip` from
-[release 1.0.1](https://github.com/GameOrDie007/Doom-VR/releases/tag/v1.0.1) (the PC version did not
-change in 1.1), extract it anywhere and run **Setup.bat** in the extracted folder. Own a game somewhere Setup doesn't look? Drop its folder
+**Installing by hand:** download `Doom-VR-1.2-PCVR.zip` from
+[release 1.2](https://github.com/GameOrDie007/Doom-VR/releases/tag/v1.2), extract it anywhere and run **Setup.bat** in the extracted folder. Own a game somewhere Setup doesn't look? Drop its folder
 onto Setup.bat.
 
 You need Windows 10 or 11 (64-bit), a PC VR headset with an OpenXR runtime, a graphics card that

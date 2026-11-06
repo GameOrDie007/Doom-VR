@@ -5796,6 +5796,8 @@ bool P_TalkFacing(AActor *player)
 //
 //==========================================================================
 
+bool DoomVR_HandJustPressed(const line_t* line, int maptime);	// p_user.cpp
+
 bool P_UseTraverse(AActor *usething, const DVector2 &start, const DVector2 &end, bool &foundline)
 {
 	FPathTraverse it(usething->Level, start.X, start.Y, end.X, end.Y, PT_ADDLINES | PT_ADDTHINGS);
@@ -5902,7 +5904,9 @@ bool P_UseTraverse(AActor *usething, const DVector2 &start, const DVector2 &end,
 				goto blocked; // Line cannot be used from front side so treat it as a non-trigger line
 			}
 
-			P_ActivateLine(in->d.line, usething, 0, SPAC_Use, &xpos);
+			// DoomVR: a hand has just pressed this line; the button must not turn the door back.
+			if (!DoomVR_HandJustPressed(in->d.line, usething->Level->maptime))
+				P_ActivateLine(in->d.line, usething, 0, SPAC_Use, &xpos);
 
 			//WAS can't use more than one special line in a row
 			//jff 3/21/98 NOW multiple use allowed with enabling line flag

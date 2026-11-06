@@ -1,0 +1,68 @@
+# The line under each game's cover in the game picker: the name as the picker
+# shows it, a bar, then a sentence or two (125 letters at most, or it will not
+# fit under the cover). A game with no line here shows no text.
+Build your own game...|Mix a game with maps, gameplay mods, looks, sounds and music, then save it as your own row in this list.
+Doom|The 1993 original. Fight your way through the moons of Mars and into Hell in the game that started it all.
+Doom (2024 re-release)|The 2024 re-release of the original Doom, with all four episodes and its updated maps.
+Doom - SIGIL|John Romero's own fifth episode for Doom, released in 2019. Nine new maps set deep in Hell.
+Doom - SIGIL II|John Romero's sixth episode for Doom, released in 2023. A harder follow-up to SIGIL.
+Doom - the Way id Did|New community maps built to look and play as if id Software had made them in 1993.
+Doom 2 the Way id Did|The same idea for Doom II: new community maps made to match id's original style.
+Doom II|The 1994 sequel. The demons have reached Earth, and you have the super shotgun.
+Doom II (2024 re-release)|The 2024 re-release of Doom II, with its updated maps.
+Doom II - Legacy of Rust|An official expansion from 2024, with new maps, new weapons and new monsters.
+Doom II - Master Levels|An official 1995 add-on: a collection of separate maps by outside level designers.
+Doom II - No Rest for the Living|A nine-map episode by Nerve Software, made for the Xbox 360 release of Doom II.
+Final Doom - TNT|TNT: Evilution, an official 1996 set of 32 maps made by community team TeamTNT.
+Final Doom - Plutonia|An official 1996 set of 32 maps by the Casali brothers. Short, brutal and famous for being hard.
+Doom 64|The 1997 Nintendo 64 Doom: new maps, a darker look and a chilling, moody soundtrack.
+PSX Doom|The 1995 PlayStation Doom, with colored lighting and an eerie ambient soundtrack.
+PSX Final Doom|The 1996 PlayStation follow-up, with maps from the Master Levels, TNT and Plutonia.
+Heretic|Raven's 1994 fantasy shooter on Doom's engine. Magic weapons, flying and a bag of useful artifacts.
+Heretic (2025 enhanced)|Heretic from the 2025 Heretic + Hexen re-release, with its updated maps and extras.
+Heretic - Faith Renewed|A new episode for Heretic, included with the 2025 re-release.
+Hexen|Raven's 1995 sequel. Play a fighter, cleric or mage through linked hub levels full of puzzles.
+Hexen (2025 enhanced)|Hexen from the 2025 Heretic + Hexen re-release, with its updated maps and extras.
+Hexen - Deathkings|Hexen's 1996 expansion: three new hubs with tougher puzzles.
+Hexen - Deathkings (2025)|Hexen's expansion from the 2025 re-release: three hubs with tougher puzzles.
+Hexen - Vestiges of Grandeur|A new episode for Hexen, included with the 2025 re-release.
+Strife|A 1996 shooter with RPG parts. Talk to people, take missions and join the rebels against the Order.
+Strife - Veteran Edition|The modern release of Strife, with fixes and extras added to the 1996 game.
+Ancient Aliens|Thirty-two colorful maps by skillsaw, with a retro sci-fi look far from Doom's usual browns.
+Ashes 2063|A post-apocalyptic adventure. Scavenge a ruined wasteland, meet survivors and fight raiders and mutants.
+Back to Saturn X - Episode 1|Huge, detailed sci-fi maps with a full set of new textures and music.
+Back to Saturn X - Episode 2|The second episode: bigger maps, still all new textures and music.
+Eviternity|A modern set of 32 maps with new monsters and a beautiful look that changes from chapter to chapter.
+Hell on Earth Starter Pack|Sergeant Mark IV's city campaign, built for Brutal Doom. Fight through streets and buildings on Earth.
+Lunatic|Five big, pretty maps by skillsaw, set on the Moon.
+Memento Mori|A classic 1996 set of 32 maps by a team of well-known mappers, with its own new music.
+Plutonia 2|A community sequel to Plutonia, just as tough. Made for players who know Doom well.
+Requiem|A classic 1997 set of 32 maps, known for its bold level design.
+Scythe|Short, sharp maps by Erik Alm that begin easy and end very hard. A community favorite.
+Scythe 2|Erik Alm's 2005 follow-up to Scythe: 32 maps that build to a fierce finish.
+Sunlust|Very hard maps full of huge fights and striking scenery. For experts.
+UAC Ultra|Maps by 40oz and Super Jamie, set in a vast high-tech lab complex deep beneath Mars.
+Valiant|Fast and tough maps by skillsaw, with reworked weapons and new monsters.
+Vanguard|Fast, action-packed maps by skillsaw, the author of Valiant.
+Whispers of Satan|Thirty levels by Paul Corfiatis and Kristian Aro, a Cacoward winner from 2009.
+Beautiful Doom|Doom as you know it, with smoother animation, better effects and more polished weapons.
+Brutal Doom|Sergeant Mark IV's famous overhaul of Doom: heavy gore, fatalities, new moves and harder fights.
+Brutal Doom II|Brutal Doom's gore, fatalities and harder fights, played on Doom II's maps.
+Brutal Doom 64|Doom 64's maps and look with Brutal Doom's gore and fatalities.
+Doom 64 Retribution|Doom 64 rebuilt by fans for modern Doom engines.
+MeatGrinder|Brutal Doom's gore made lighter and faster, for maps with huge numbers of monsters.
+Project Brutality|Brutal Doom pushed further: more weapons, more kinds of monsters and more ways to fight.
+Adventures of Square|A bright, silly cartoon shooter. You are a square, fighting the Circle of Evil with paint guns.
+Aliens - Eradication|A total conversion based on the Aliens films.
+Blood - ZBloody Hell|Monolith's horror shooter Blood, rebuilt on the Doom engine.
+Brutal Wolfenstein|Wolfenstein 3D rebuilt on the Doom engine, with Brutal Doom's gore and modern action.
+Castlevania - Simon's Destiny|Castlevania in first person. Take Simon Belmont's whip through Dracula's castle.
+Chex Quest 3|The family-friendly one: zap slimy Flemoids back to their home instead of shooting demons.
+Duke Nukem 3D TC|Duke Nukem 3D's levels and weapons, remade on the Doom engine.
+HacX|A 1997 cyberpunk shooter on the Doom engine, now free to play.
+Project Osiris|A remake of the Amiga shooter Alien Breed 3D, free and built on the Doom engine.
+Return of the Triad|Rise of the Triad remade on the Doom engine, with its wild weapons and god mode.
+Blasphemer|A free stand-in for Heretic, with its own new art and maps.
+FreeDM|Free arena maps for deathmatch, from the Freedoom project.
+Freedoom Phase 1|A free stand-in for Doom, with all-new art, sound and maps.
+Freedoom Phase 2|A free stand-in for Doom II: 32 all-new maps with all-new art and sound.

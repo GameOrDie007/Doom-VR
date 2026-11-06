@@ -16,6 +16,9 @@
 ** game's own title screen) and the engine loads for every game. No pack, or
 ** no cover for a game, leaves the plain list - never an error.
 **
+** Under the cover, a line or two on what the game is: doomvr_games.txt, the
+** game's name, a bar, then the text. A game not in that file shows none.
+**
 ** SPDX-License-Identifier: GPL-3.0-or-later
 */
 
@@ -28,9 +31,18 @@ class DoomVRGameSelectMenu : OptionMenu
 	const CARD_WIDTH = 0.50;         // the list's card, of the screen's width
 	const BLUR = 0.0045;             // the backdrop's softening, of the screen's height
 
+	const NOTE_TEXT = 0.028;         // a line of the note's height, of the screen's height
+	const NOTE_MAX_LINES = 6;        // what fits under the cover
+
 	int coverItem;
 	TextureID coverTex;
 	TextureID backdrop;
+
+	Array<String> noteNames;
+	Array<String> noteTexts;
+	int noteItem;
+	int noteWidth;
+	BrokenLines noteLines;
 
 	// The PC's mouse picks no row until it moves: a cursor left resting over
 	// the window - where the shortcut was double-clicked - selected the row
@@ -58,6 +70,8 @@ class DoomVRGameSelectMenu : OptionMenu
 	{
 		Super.Init(parent, desc);
 		coverItem = -2;
+		noteItem = -2;
+		LoadNotes();
 		mouseSeen = false;
 		mouseMoved = false;
 		// The backdrop picture when there is one (no title text on it), else the splash.
@@ -77,6 +91,65 @@ class DoomVRGameSelectMenu : OptionMenu
 				return;
 			}
 		}
+	}
+
+	void LoadNotes()
+	{
+		noteNames.Clear();
+		noteTexts.Clear();
+		int lump = Wads.CheckNumForFullName("doomvr_games.txt");
+		if (lump < 0) return;
+		Array<String> lines;
+		Wads.ReadLump(lump).Split(lines, "\n");
+		for (int i = 0; i < lines.Size(); i++)
+		{
+			String line = lines[i];
+			line.Substitute("\r", "");
+			if (line.Left(1) == "#") continue;
+			int bar = line.IndexOf("|");
+			if (bar <= 0) continue;
+			noteNames.Push(line.Left(bar));
+			noteTexts.Push(line.Mid(bar + 1));
+		}
+	}
+
+	// What the highlighted row's game is. A build from Build Your Own Game
+	// ("Doom II + Brutal Doom") has its game's; "Continue: " the game it continues.
+	virtual String GameNote(int item)
+	{
+		if (item < 0 || item >= mDesc.mItems.Size()) return "";
+		let it = OptionMenuItem(mDesc.mItems[item]);
+		if (it == null || !it.Selectable() || it.mLabel.Length() == 0) return "";
+		String label = it.mLabel;
+		if (label.IndexOf("Continue: ") == 0) label = label.Mid(10);
+		int plus = label.IndexOf(" + ");
+		if (plus > 0) label = label.Left(plus);
+		for (int i = 0; i < noteNames.Size(); i++)
+			if (noteNames[i] == label) return noteTexts[i];
+		return "";
+	}
+
+	// Broken into lines when the selection changes, not every frame.
+	void DrawGameNote(double x, double y, double w)
+	{
+		double sh = Screen.GetHeight();
+		double scale = sh * NOTE_TEXT / NewSmallFont.GetHeight();
+		double pad = sh * 0.008;
+		int width = int((w - pad * 2) / scale);
+		if (width <= 0) return;
+		if (mDesc.mSelectedItem != noteItem || width != noteWidth)
+		{
+			noteItem = mDesc.mSelectedItem;
+			noteWidth = width;
+			String text = GameNote(noteItem);
+			noteLines = text.Length() > 0 ? NewSmallFont.BreakLines(text, width) : null;
+		}
+		if (noteLines == null) return;
+		int n = min(noteLines.Count(), NOTE_MAX_LINES);
+		double step = sh * NOTE_TEXT * 1.05;
+		Screen.Dim(0x000000, 0.65, int(x), int(y), int(w), int(step * n + pad * 2));
+		for (int i = 0; i < n; i++)
+			Screen.DrawText(NewSmallFont, Font.CR_WHITE, x + pad, y + pad + step * i, noteLines.StringAt(i), DTA_ScaleX, scale, DTA_ScaleY, scale);
 	}
 
 	// Looked up when the selection changes, not every frame: the first lookup
@@ -162,17 +235,19 @@ class DoomVRGameSelectMenu : OptionMenu
 	{
 		DrawBackdrop();
 		Super.Drawer();
-		TextureID tex = Cover(mDesc.mSelectedItem);
-		if (!tex.IsValid()) return;
-
 		double sw = Screen.GetWidth(), sh = Screen.GetHeight();
 		double h = sh * COVER_HEIGHT;
 		double w = h * COVER_ASPECT;
 		double x = sw - w - sw * COVER_MARGIN;
 		double y = (sh - h) * 0.5;
-		// A dark plate a little larger than the cover gives it an edge.
 		double b = sh * 0.008;
-		Screen.Dim(0x000000, 0.65, int(x - b), int(y - b), int(w + b * 2), int(h + b * 2));
-		Screen.DrawTexture(tex, false, x, y, DTA_DestWidthF, w, DTA_DestHeightF, h);
+		TextureID tex = Cover(mDesc.mSelectedItem);
+		if (tex.IsValid())
+		{
+			// A dark plate a little larger than the cover gives it an edge.
+			Screen.Dim(0x000000, 0.65, int(x - b), int(y - b), int(w + b * 2), int(h + b * 2));
+			Screen.DrawTexture(tex, false, x, y, DTA_DestWidthF, w, DTA_DestHeightF, h);
+		}
+		DrawGameNote(x - b, y + h + b * 2, w + b * 2);
 	}
 }

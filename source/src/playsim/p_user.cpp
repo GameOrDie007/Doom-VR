@@ -2191,8 +2191,23 @@ static void DoomVR_RoomWalk(player_t* player)
 	answers it again). The use button stays. On by default
 	(vr_phys_use). Hands come from DoomVR_SetHands' own positions (the tracked
 	hands, in the map).
+
+	A second press on a moving door turns it back, and walking up to a door
+	puts a hand on it before the player reaches for the button. So a line a
+	hand has just pressed ignores the other hand and the use button for a
+	moment (kHandPressHold tics, about a second and a half).
 */
 CVAR(Bool, vr_phys_use, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+static const int kHandPressHold = 52;
+static const line_t* handPressedLine[2];
+static int handPressedAt[2];
+bool DoomVR_HandJustPressed(const line_t* line, int maptime)
+{
+	for (int hand = 0; hand < 2; ++hand)
+		if (handPressedLine[hand] == line && maptime >= handPressedAt[hand] && maptime - handPressedAt[hand] < kHandPressHold)
+			return true;
+	return false;
+}
 static void DoomVR_TouchUse(player_t* player, int hand, const DVector3& pos)
 {
 	static line_t* touching[2];
@@ -2221,10 +2236,15 @@ static void DoomVR_TouchUse(player_t* player, int hand, const DVector3& pos)
 	if (!stillNear) touching[hand] = nullptr;
 	if (best == nullptr || best == touching[hand]) return;
 	touching[hand] = best;
+	if (DoomVR_HandJustPressed(best, mo->Level->maptime)) return;
 	const int side = P_PointOnLineSide(pos.XY(), best);
 	DVector3 at = pos;
 	if (P_ActivateLine(best, mo, side, SPAC_Use, &at))
+	{
+		handPressedLine[hand] = best;
+		handPressedAt[hand] = mo->Level->maptime;
 		Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: %s hand pressed line %d (special %d)\n", hand == 0 ? "weapon" : "other", best->Index(), best->special);
+	}
 }
 
 static void DoomVR_SetHands(player_t* player)
