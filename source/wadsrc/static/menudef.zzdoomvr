@@ -108,6 +108,11 @@ OptionMenu "DoomVRBuild" protected
 // VR Options: a short first page - recenter, the game, the style - and four
 // pages, one per thing a player comes looking for. Every setting lives on
 // exactly one page.
+OptionMenu "DoomVRModKeys" protected
+{
+	Title "This Game's Own Keys"
+}
+
 OptionMenu "DoomVROptions" protected
 {
 	Title "VR Options"

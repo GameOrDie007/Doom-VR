@@ -93,6 +93,9 @@ PLAYING
 
 CONTROLS
     Left stick ........ walk (where you look); hold it in to run
+                        No menu button on your link (some Virtual Desktop
+                        setups)? Stand still and hold it in for a second:
+                        it opens the menu.
     Right stick ....... turn; flick up = use item, down = next item
     Right trigger ..... fire (where your hand points; the red dot shows where
                         the shot will land); clicks in menus

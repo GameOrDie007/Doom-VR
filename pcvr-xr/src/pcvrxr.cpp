@@ -196,6 +196,12 @@ bool Session::Impl::CreateInstance() {
     // simply not run in VR on anyone else's.
     std::vector<const char*> exts;
     exts.push_back(graphicsExt);
+#ifdef __ANDROID__
+    // We chain XrInstanceCreateInfoAndroidKHR below, and that struct belongs to
+    // this extension. A Quest lets it pass unasked; SteamVR on the Steam Frame
+    // refuses the whole instance (-1, validation failure) and there is no VR.
+    if (has(XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME)) exts.push_back(XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME);
+#endif
 
     haveRefreshRate = has("XR_FB_display_refresh_rate");
     if (haveRefreshRate) exts.push_back("XR_FB_display_refresh_rate");
@@ -231,6 +237,13 @@ bool Session::Impl::CreateInstance() {
         }
     }
 
+#ifdef __ANDROID__
+    {
+        std::string asked;
+        for (const char* e : exts) { if (!asked.empty()) asked += " "; asked += e; }
+        Log("pcvr-xr: asking for: %s", asked.c_str());
+    }
+#endif
     XrInstanceCreateInfo ci{ XR_TYPE_INSTANCE_CREATE_INFO };
     ci.enabledExtensionCount = (uint32_t)exts.size();
     ci.enabledExtensionNames = exts.data();
@@ -534,17 +547,32 @@ bool Session::Impl::CreateSwapchains() {
     for (int64_t f : formats) { if (f == 0x8C43 /*GL_SRGB8_ALPHA8*/) { chosen = f; break; } }
     chosenFormat = chosen;
 
+    // Steam's fdm_injection layer foveates every render pass the size of a
+    // swapchain, for a GL game through Zink, and it cannot tell the eyes apart:
+    // the engine's own eye targets are that size, so one eye's sharp spot lands
+    // off centre and that eye looks blurred. A swapchain two pixels bigger than
+    // the picture matches nothing we draw, and the picture is copied in.
+    int pad = 0;
+#ifdef __ANDROID__
+    if (haveFrameControllers) {
+        pad = 2;
+        Log("pcvr-xr: Steam Frame: swapchain %dx%d for a %dx%d picture, out of the foveation layer's way", eyeW + pad, eyeH + pad, eyeW, eyeH);
+    }
+#endif
+
     for (int e = 0; e < eyeCount; ++e) {
         Eye& eye = eyes[e];
         eye.width = eyeW;
         eye.height = eyeH;
+        eye.swapW = eyeW + pad;
+        eye.swapH = eyeH + pad;
 
         XrSwapchainCreateInfo sci{ XR_TYPE_SWAPCHAIN_CREATE_INFO };
         sci.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
         sci.format = chosen;
         sci.sampleCount = 1;
-        sci.width = eyeW;
-        sci.height = eyeH;
+        sci.width = eye.swapW;
+        sci.height = eye.swapH;
         sci.faceCount = 1;
         sci.arraySize = 1;
         sci.mipCount = 1;
@@ -560,7 +588,7 @@ bool Session::Impl::CreateSwapchains() {
         gl.GenFramebuffers((GLsizei)imageCount, eye.fbos.data());
         gl.GenRenderbuffers(1, &eye.depth);
         gl.BindRenderbuffer(GL_RENDERBUFFER, eye.depth);
-        gl.RenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, eyeW, eyeH);
+        gl.RenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, eye.swapW, eye.swapH);
         for (uint32_t i = 0; i < imageCount; ++i) {
             // The swapchain image is a texture the runtime created, and it
             // arrives with GL's defaults - which include a minification filter
@@ -743,6 +771,9 @@ bool Session::BringUp(const Config& cfg) {
     m->cfg = cfg;
     m->failure.clear();
     m->useSceneTarget = cfg.renderToOwnTarget;
+#ifdef __ANDROID__
+    if (m->haveFrameControllers) m->useSceneTarget = true;   // see the swapchain's size in CreateSwapchains
+#endif
 
 #ifdef PCVRXR_D3D11
     if (m->IsD3D()) {
@@ -1268,11 +1299,11 @@ void Session::EndEye(int eye) {
         glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &tw);
         glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &th);
         glBindTexture(GL_TEXTURE_2D, 0);
-        if (tw != e.width || th != e.height) {
+        if (tw != e.swapW || th != e.swapH) {
             m->Log("pcvr-xr: THE PORT HAS OVERWRITTEN SWAPCHAIN TEXTURE %u - it is %dx%d, "
                    "not %dx%d. This engine assigns its own texture names; reserve the ones "
                    "SwapchainTextures() reports, or the compositor will be shown a game texture.",
-                   e.images[e.index].image, tw, th, e.width, e.height);
+                   e.images[e.index].image, tw, th, e.swapW, e.swapH);
         }
     }
 #endif

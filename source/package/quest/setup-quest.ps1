@@ -61,8 +61,8 @@ param(
     [string] $Serial,
     [switch] $SteamFrame,
     [string] $Frame = '',
-    # 72 Hz until the game's own rate on the Frame is measured.
-    [int] $RefreshHz = 72,
+    # 90 Hz: left alone the Frame held 72, with 7 ms a frame to spare.
+    [int] $RefreshHz = 90,
     # Tests: no questions; only the folders given; this adb; how long to wait.
     [switch] $NoPrompt,
     [switch] $NoSearch,
@@ -887,6 +887,15 @@ function Do-FrameInstall {
     #    time only (the player's own after that).
     $remoteGame = $FrameFiles + '/game'
     Frame-SyncFiles $g.Files $g.Dir $remoteGame 'the games' | Out-Null
+    # The Game Tome's controller models, as step 7b does for a Quest: a PC's game folder has
+    # none (it reads them from SteamVR), so they come from this download.
+    $ctl = Join-Path $QuestHere 'game\gametome\controllers'
+    if (Test-Path -LiteralPath $ctl) {
+        $ctlRoot = (Resolve-Path -LiteralPath $ctl).ProviderPath.TrimEnd('\')
+        $ctlFiles = @{}
+        foreach ($f in Get-ChildItem -LiteralPath $ctlRoot -Recurse -File) { $ctlFiles[$f.FullName.Substring($ctlRoot.Length + 1).Replace('\', '/')] = $f }
+        Frame-SyncFiles $ctlFiles $ctlRoot ($remoteGame + '/gametome/controllers') 'the Game Tome''s controller models' | Out-Null
+    }
     if ($g.Launch) {
         $lf = Write-Temp 'launch.txt' $g.Launch
         if (-not (Scp-To $lf ($remoteGame + '/launch.txt'))) { throw 'copying launch.txt to the Frame failed' }

@@ -177,6 +177,22 @@ void OpenGLFrameBuffer::Update()
 	Super::Update();
 }
 
+// DoomVR: GLES only promises reading back as RGBA. The Quest's driver takes GL_RGB too;
+// the Steam Frame's refuses it and leaves the buffer as it was, so every save picture
+// and screenshot there was uninitialized memory.
+static void ReadPixelsRGB(int x, int y, int width, int height, uint8_t* out)
+{
+	TArray<uint8_t> rgba(width * height * 4, true);
+	glPixelStorei(GL_PACK_ALIGNMENT, 4);
+	glReadPixels(x, y, width, height, GL_RGBA, GL_UNSIGNED_BYTE, rgba.Data());
+	for (int i = 0; i < width * height; ++i)
+	{
+		out[i * 3 + 0] = rgba[i * 4 + 0];
+		out[i * 3 + 1] = rgba[i * 4 + 1];
+		out[i * 3 + 2] = rgba[i * 4 + 2];
+	}
+}
+
 void OpenGLFrameBuffer::CopyScreenToBuffer(int width, int height, uint8_t* scr)
 {
 	IntRect bounds;
@@ -188,7 +204,7 @@ void OpenGLFrameBuffer::CopyScreenToBuffer(int width, int height, uint8_t* scr)
 
 	// strictly speaking not needed as the glReadPixels should block until the scene is rendered, but this is to safeguard against shitty drivers
 	glFinish();
-	glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, scr);
+	ReadPixelsRGB(0, 0, width, height, scr);
 }
 
 //===========================================================================
@@ -424,9 +440,7 @@ TArray<uint8_t> OpenGLFrameBuffer::GetScreenshotBuffer(int &pitch, ESSType &colo
 	// We cannot rely on SCREENWIDTH/HEIGHT here because the output may have been scaled.
 	TArray<uint8_t> pixels;
 	pixels.Resize(viewport.width * viewport.height * 3);
-	glPixelStorei(GL_PACK_ALIGNMENT, 1);
-	glReadPixels(viewport.left, viewport.top, viewport.width, viewport.height, GL_RGB, GL_UNSIGNED_BYTE, &pixels[0]);
-	glPixelStorei(GL_PACK_ALIGNMENT, 4);
+	ReadPixelsRGB(viewport.left, viewport.top, viewport.width, viewport.height, &pixels[0]);
 
 	// Copy to screenshot buffer:
 	int w = SCREENWIDTH;

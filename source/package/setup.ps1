@@ -671,7 +671,13 @@ function Run-GameSetup([string] $game) {
     Log $InstallNote
     # Each line passed on as it comes, so a tool or hub showing our output
     # can say what is being downloaded right now.
-    & powershell.exe @args2 2>&1 | ForEach-Object { Add-Content -LiteralPath $LogFile -Value ('  ' + [string]$_) -Encoding UTF8; Say ('  ' + [string]$_) }
+    # Its error lines are logged, not fatal: with Stop here, one line on stderr ended the
+    # whole install at once (exit 2) before the player saw why.
+    $keep = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & powershell.exe @args2 2>&1 | ForEach-Object { Add-Content -LiteralPath $LogFile -Value ('  ' + [string]$_) -Encoding UTF8; Say ('  ' + [string]$_) }
+    } finally { $ErrorActionPreference = $keep }
     $code = $LASTEXITCODE
     return ($code -eq 0)
 }
@@ -910,6 +916,15 @@ function Do-Collect {
     $work = Join-Path ([System.IO.Path]::GetTempPath()) ('doomvr-logs-' + $stamp)
     if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force }
     New-Item -ItemType Directory -Path $work | Out-Null
+
+    # A Setup that stopped early left its log beside the Installer's unpacked
+    # download, in no VR folder: the one log that says why.
+    $pkg = Join-Path $env:LOCALAPPDATA 'Game Or Die\Installer\packages'
+    foreach ($d in @(Get-ChildItem -LiteralPath $pkg -Directory -Filter 'doomvr-*' -ErrorAction SilentlyContinue)) {
+        foreach ($f in @(Get-ChildItem -LiteralPath $d.FullName -Filter 'setup-log.txt' -File -Recurse -Depth 2 -ErrorAction SilentlyContinue)) {
+            Copy-Item -LiteralPath $f.FullName -Destination (Join-Path $work ('installer-' + $d.Name + '-setup-log.txt')) -Force
+        }
+    }
 
     $folders = Installed-VRFolders
     $n = 0

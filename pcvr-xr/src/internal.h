@@ -200,6 +200,7 @@ struct Eye {
     GLuint depth = 0;
     uint32_t index = 0;   // the image acquired this frame
     int width = 0, height = 0;
+    int swapW = 0, swapH = 0;   // the swapchain image: bigger than the picture on a Steam Frame
 
     // The target the port actually renders into, which is NOT the swapchain
     // image. See BeginEye for why.

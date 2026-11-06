@@ -15,8 +15,8 @@ built on [UZDoom](https://github.com/UZDoom/UZDoom) 5.0.1.
 3. Start your VR runtime (Virtual Desktop, SteamVR or Quest Link) and press **PRESS START**, or use
    the **Doom VR** shortcut on your desktop. The game picker opens on Doom; pick any game.
 
-**Installing by hand:** download `Doom-VR-1.2-PCVR.zip` from
-[release 1.2](https://github.com/GameOrDie007/Doom-VR/releases/tag/v1.2), extract it anywhere and run **Setup.bat** in the extracted folder. Own a game somewhere Setup doesn't look? Drop its folder
+**Installing by hand:** download `Doom-VR-1.2.1-PCVR.zip` from
+[release 1.2.1](https://github.com/GameOrDie007/Doom-VR/releases/tag/v1.2.1), extract it anywhere and run **Setup.bat** in the extracted folder. Own a game somewhere Setup doesn't look? Drop its folder
 onto Setup.bat.
 
 You need Windows 10 or 11 (64-bit), a PC VR headset with an OpenXR runtime, a graphics card that
@@ -43,7 +43,7 @@ fits come from your PC's Doom VR install, so install the PC version first.
    time, put the headset on and choose Allow.
 3. On the headset: Library, Unknown Sources, **Doom VR**.
 
-By hand: download `Doom-VR-1.2-Quest.zip` from [Releases](../../releases), unzip it on your PC and
+By hand: download `Doom-VR-1.2.1-Quest.zip` from [Releases](../../releases), unzip it on your PC and
 double-click **Setup.bat**. The headset needs Developer mode, turned on once in the Meta Horizon
 phone app; the download's README walks through it. Run the installer or Setup again after an
 update: it copies only what changed and keeps your saved games and settings.
@@ -113,7 +113,7 @@ The same download runs on a Valve Steam Frame with no PC, in the Frame's own lib
 - **Standalone on a Quest 3 or the Steam Frame?** Yes, since 1.1: see Standalone above. The games
   come from your PC's Doom VR install.
 - **Can I add my own WADs?** Yes: put them in `VR\game\My WADs` and pick them at the bottom of the
-  game picker. A WAD with Doom 1 maps plays on Doom, anything else on Doom II; for another game,
+  game picker. A mod in its own folder, or a zip as it comes from GitHub, works too. A WAD with Doom 1 maps plays on Doom, anything else on Doom II; for another game,
   put it in a folder named after that game in the picker (`My WADs\Heretic`). The Modern looks
   that would clash with its own monsters or textures are left out for it.
 - **Multiplayer?** Single player for now.
@@ -122,6 +122,8 @@ The same download runs on a Valve Steam Frame with no PC, in the Frame's own lib
   and play the Classic style.
 - **Left-handed? Seated?** Yes: the Leftorium (left-handed) in VR Options, and Seated reach for
   the holsters.
+- **No menu button?** Some Virtual Desktop setups never pass the left menu button on. Stand still
+  and hold the left stick in for a second: it opens the menu.
 - **It started on the monitor, not in the headset.** Start your VR runtime first, then Doom VR.
   Still flat, or something broke? Run **Collect logs.bat** in the VR folder (or press **logs** in
   the installer) and open an issue on this page with the zip and a line about what happened.

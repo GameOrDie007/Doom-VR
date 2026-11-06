@@ -1845,6 +1845,26 @@ namespace
 			if (paused2D && kButtons[i].key == KEY_VR_LSTICK) down = false;
 			if (gPhotoMode || gSwallowUntilReleased) down = false;
 			if (tuning && (kButtons[i].key == KEY_VR_LSTICK || kButtons[i].key == KEY_VR_RSTICK)) down = false;
+			// A link that never passes the real menu button on (GitHub issue 1,
+			// Virtual Desktop) would leave a player with no way into the menu, so
+			// the left stick held in for a second, standing still, opens it too.
+			// Clicked in is run: pushed over, this never fires, and neither does
+			// it once the real button has been seen working.
+			static bool realMenuSeen = false;
+			if (kButtons[i].key == KEY_VR_MENU && down) realMenuSeen = true;
+			if (kButtons[i].key == KEY_VR_LSTICK && !gPadLayout)
+			{
+				static double stillSince = 0.;
+				const bool still = down && l.thumbstick.x * l.thumbstick.x + l.thumbstick.y * l.thumbstick.y < 0.09f;
+				if (!still) stillSince = 0.;
+				else if (stillSince == 0.) stillSince = NowMs();
+				if (still && stillSince > 0. && NowMs() - stillSince >= 1000. && !realMenuSeen && menuactive == MENU_Off)
+				{
+					stillSince = -1.;
+					Joy_GenerateButtonEvent(true, KEY_VR_MENU);
+					Joy_GenerateButtonEvent(false, KEY_VR_MENU);
+				}
+			}
 			const EKeyCodes key = EffectiveKey(i);
 			if (key == 0) { gButtonDown[i] = false; continue; }
 			if (kButtons[i].key == KEY_VR_RSTICK && WheelButton(down, key, !paused2D && !tuning && !gPhotoMode))
@@ -1990,6 +2010,7 @@ namespace
 			else if (c.CompareNoCase("rtrigger") == 0) { r.trigger = 1; r.triggerClick.down = true; }
 			else if (c.CompareNoCase("lup") == 0) l.thumbstick.y = 1;
 			else if (c.CompareNoCase("lrun") == 0) { l.thumbstick.y = 1; l.thumbstickClick.down = true; }
+			else if (c.CompareNoCase("lrunright") == 0) { l.thumbstickClick.down = true; if (NowMs() - gFakeStartMs >= 120.) l.thumbstick.x = 1; }
 			else if (c.CompareNoCase("ldown") == 0) l.thumbstick.y = -1;
 			else if (c.CompareNoCase("lleft") == 0) l.thumbstick.x = -1;
 			else if (c.CompareNoCase("lright") == 0) l.thumbstick.x = 1;
@@ -3808,7 +3829,7 @@ CCMD(vr_debug_space_change)
 
 // Hold one control on made-up controllers for N frames (default 20), then
 // release it: vr_debug_input rtrigger 30. Controls: a b x y menu lgrip rgrip
-// lclick rclick ltrigger rtrigger lup lrun ldown lleft lright rleft rright rup
+// lclick rclick ltrigger rtrigger lup lrun lrunright ldown lleft lright rleft rright rup
 // (lrun: the left stick forward and clicked in).
 CCMD(vr_debug_input)
 {

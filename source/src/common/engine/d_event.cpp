@@ -189,6 +189,29 @@ void PostMouseMove(int xx, int yy)
 }
 
 
+// DoomVR: what a mod that reads keys itself should see. DoomRPG's own menus
+// know a gamepad's left stick and the key bound to +speed: the VR left stick
+// and Run are neither, and its menus could not be moved through or paged.
+static int DoomVR_KeyForMods(int key)
+{
+	switch (key)
+	{
+	case KEY_VR_LSTICK_UP:    return KEY_PAD_LTHUMB_UP;
+	case KEY_VR_LSTICK_DOWN:  return KEY_PAD_LTHUMB_DOWN;
+	case KEY_VR_LSTICK_LEFT:  return KEY_PAD_LTHUMB_LEFT;
+	case KEY_VR_LSTICK_RIGHT: return KEY_PAD_LTHUMB_RIGHT;
+	default: break;
+	}
+	const FString bound = Bindings.GetBinding(key);
+	if (bound.CompareNoCase("+vr_run") == 0 || (key == KEY_VR_LSTICK && bound.IsEmpty()))
+	{
+		int first = 0, second = 0;
+		Bindings.GetKeysForCommand("+speed", &first, &second);
+		if (first != 0) return first;
+	}
+	return key;
+}
+
 FInputEvent::FInputEvent(const event_t *ev)
 {
 	Type = (EGenericEvent)ev->type;
@@ -203,7 +226,7 @@ FInputEvent::FInputEvent(const event_t *ev)
 		break;
 	case EV_KeyDown:
 	case EV_KeyUp:
-		KeyScan = ev->data1;
+		KeyScan = DoomVR_KeyForMods(ev->data1);
 		KeyChar = ev->data2;
 		KeyString = FString(char(ev->data1));
 		break;

@@ -126,6 +126,7 @@ bool Load()
 	int mine = 0;
 	for (auto& w : DoomVR_MyWads())
 	{
+		if (!w.unpack.empty()) continue;	// unpacked when played, from Switch Game
 		Piece p;
 		p.id = "mywads-" + std::to_string(++mine);
 		p.label = w.label + " (My WADs)";
@@ -141,6 +142,11 @@ bool Load()
 		std::string path = w.path;
 		for (auto& c : path) if (c == '/') c = '\\';
 		p.args = "-file \"" + path + "\"";
+		for (std::string more : w.more)
+		{
+			for (auto& c : more) if (c == '/') c = '\\';
+			p.args += " -file \"" + more + "\"";
+		}
 		gPieces.push_back(p);
 	}
 	return !gPieces.empty() && !gTemplate.empty();

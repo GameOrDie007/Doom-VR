@@ -16,7 +16,9 @@
 struct DoomVRMyWad
 {
 	std::string label;		// its row: the file's name, made unique
-	std::string path;		// the file
+	std::string path;		// the file, or a mod's folder
+	std::vector<std::string> more;		// folders that load after it: its -Extras
+	std::vector<std::string> unpack;	// an archive with the mod one folder down: those folders
 	std::string launcher;	// the game it plays on
 	std::string kind;		// "doom1" (ExMy maps) or "doom2" (MAPxx, or no maps)
 	bool maps = false;		// it has maps of its own
@@ -28,3 +30,6 @@ struct DoomVRMyWad
 };
 
 std::vector<DoomVRMyWad> DoomVR_MyWads();
+// What a row loads, in order. An archive with the mod one folder down is
+// unpacked first, the first time it is played.
+std::vector<std::string> DoomVR_MyWadFiles(const DoomVRMyWad& w);

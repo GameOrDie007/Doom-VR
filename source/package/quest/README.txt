@@ -34,6 +34,9 @@ Play
 Quest 3:      Library, Unknown Sources, Doom VR.
 Steam Frame:  Library, Doom VR (its own entry, with its art).
 
+No menu button on your link (some Virtual Desktop setups)? Stand still and
+hold the left stick in for a second: it opens the menu too.
+
 The game picker opens first, as on the PC; Switch Game (main menu, or Options)
 has every game. Your settings from the PC come over the first time, so your
 hand fits and options are the same.

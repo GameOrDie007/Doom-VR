@@ -26,6 +26,7 @@
 #include "c_cvars.h"
 #include "v_font.h"
 #include "m_argv.h"
+#include "c_bind.h"
 #include "gamestate.h"
 #include "doomstat.h"
 #include "doomvr_mywads.h"
@@ -93,6 +94,39 @@ CVAR(String, vr_book_game, "", CVAR_NOSAVE)
 
 static FString MyWadsDir() { return progdir + "My WADs/"; }
 
+// A file that only sits at the top of a mod: the sign that a folder, or one
+// folder inside an archive, is where the mod itself starts.
+static bool IsModRootFile(const char* name)
+{
+	static const char* const kRoot[] = { "DECORATE", "ZSCRIPT", "MAPINFO", "ZMAPINFO", "KEYCONF", "GAMEINFO", "MENUDEF", "LOADACS", "SNDINFO" };
+	for (const char* r : kRoot)
+	{
+		const size_t n = strlen(r);
+		if (strnicmp(name, r, n) == 0 && (name[n] == 0 || name[n] == '.')) return true;
+	}
+	return false;
+}
+
+static bool IsModDir(const std::string& dir)
+{
+	std::vector<FileSys::FileListEntry> found;
+	if (!FileSys::ScanDirectory(found, dir.c_str(), "*", true)) return false;
+	for (auto& f : found) if (!f.isDirectory && IsModRootFile(f.FileName.c_str())) return true;
+	return false;
+}
+
+// "X-Extras" beside "X": its add-on, loaded with it. Any other "X-Something"
+// beside "X" (DoomRPG-RLArsenal: it needs another mod) is left for the player
+// to add; a release's folder carries a dozen of those.
+static bool IsAddOnOf(const std::string& name, const std::string& base)
+{
+	return name.size() > base.size() + 1 && name[base.size()] == '-' && strnicmp(name.c_str(), base.c_str(), base.size()) == 0;
+}
+static bool IsExtrasOf(const std::string& name, const std::string& base)
+{
+	return IsAddOnOf(name, base) && stricmp(name.c_str() + base.size() + 1, "Extras") == 0;
+}
+
 static bool LauncherExists(const std::string& name)
 {
 	return !name.empty() && FileExists(LaunchersDir() + name.c_str() + ".bat");
@@ -100,16 +134,59 @@ static bool LauncherExists(const std::string& name)
 
 // Its maps - "doom1" (ExMy), "doom2" (MAPxx), "" (none) or "iwad" - and what
 // it brings of its own (DoomVRMyWad::tags), from its directory alone.
-static std::string MyWadScan(const std::string& path, std::vector<std::string>& tags)
+static std::string MyWadScan(const std::string& path, std::vector<std::string>& tags, std::vector<std::string>* unpack = nullptr)
 {
-	FILE* f = fopen(path.c_str(), "rb");
-	if (f == nullptr) return "";
-	char head[4] = {};
-	const bool iwad = fread(head, 1, 4, f) == 4 && memcmp(head, "IWAD", 4) == 0;
-	fclose(f);
-	if (iwad) return "iwad";
-	auto res = FResourceFile::OpenResourceFile(path.c_str(), true);
+	const bool isDir = DirExists(path.c_str());
+	if (!isDir)
+	{
+		FILE* f = fopen(path.c_str(), "rb");
+		if (f == nullptr) return "";
+		char head[4] = {};
+		const bool iwad = fread(head, 1, 4, f) == 4 && memcmp(head, "IWAD", 4) == 0;
+		fclose(f);
+		if (iwad) return "iwad";
+	}
+	auto res = isDir ? FResourceFile::OpenDirectory(path.c_str()) : FResourceFile::OpenResourceFile(path.c_str(), true);
 	if (res == nullptr) return "";
+	// A mod zipped one folder too high (a release's folder, GitHub's zip) has
+	// nothing at its top for the game to read: it loads, does nothing, and the
+	// player gets the plain game. Its real top is one folder down.
+	std::vector<std::string> inner;
+	if (!isDir)
+	{
+		// The folders nearest the top that hold such a file: one down, or two
+		// in a zip that wraps everything in one more folder (GitHub's). A
+		// folder the game itself reads (filter\, actors\...) is the mod's own.
+		static const char* const kGameFolders[] = { "acs", "actors", "brightmaps", "filter", "flats", "fonts", "graphics", "hires", "maps", "materials", "models",
+			"music", "patches", "scripts", "shaders", "sounds", "sprites", "textures", "voices", "voxels", "zscript" };
+		bool top = false;
+		int nearest = 3;
+		for (uint32_t i = 0; i < res->EntryCountU() && !top; ++i)
+		{
+			const char* full = res->getName(i);
+			if (full == nullptr) continue;
+			const char* slash = strrchr(full, '/');
+			if (slash == nullptr) { top = IsModRootFile(full); continue; }
+			if (!IsModRootFile(slash + 1)) continue;
+			const std::string folder(full, slash - full);
+			const int depth = 1 + int(std::count(folder.begin(), folder.end(), '/'));
+			const std::string first = folder.substr(0, folder.find('/'));
+			if (depth > nearest || std::any_of(std::begin(kGameFolders), std::end(kGameFolders), [&](const char* g) { return stricmp(g, first.c_str()) == 0; })) continue;
+			if (depth < nearest) { inner.clear(); nearest = depth; }
+			if (std::find(inner.begin(), inner.end(), folder) == inner.end()) inner.push_back(folder);
+		}
+		if (top) inner.clear();
+		std::sort(inner.begin(), inner.end());
+		std::vector<std::string> kept;
+		for (auto& n : inner)
+		{
+			const bool addOn = std::any_of(inner.begin(), inner.end(), [&](const std::string& b) { return IsAddOnOf(n, b); });
+			const bool extras = std::any_of(inner.begin(), inner.end(), [&](const std::string& b) { return IsExtrasOf(n, b); });
+			if (!addOn || extras) kept.push_back(n);
+		}
+		inner = kept;
+		if (unpack != nullptr) *unpack = inner;
+	}
 	static const char* const kMonsters[] = {
 		"POSS", "SPOS", "CPOS", "TROO", "SARG", "HEAD", "SKUL", "BOSS", "BOS2", "PAIN", "SKEL", "FATT", "BSPI", "CYBR", "SPID", "VILE", "SSWV", "KEEN",
 		"IMPX", "KNIG", "WZRD", "MUMM", "BEAS", "CLNK", "SNKE", "MNTR", "SRCR", "SOR2",
@@ -127,6 +204,14 @@ static std::string MyWadScan(const std::string& path, std::vector<std::string>& 
 	{
 		const char* full = res->getName(i);
 		if (full == nullptr) continue;
+		if (!inner.empty())
+		{
+			const char* in = nullptr;
+			for (auto& n : inner)
+				if (strnicmp(full, n.c_str(), n.size()) == 0 && full[n.size()] == '/') in = full + n.size() + 1;
+			if (in == nullptr) continue;
+			full = in;
+		}
 		const char* slash = strrchr(full, '/');
 		const char* base = slash ? slash + 1 : full;
 		// A sprite: between a WAD's S_START and S_END, or under a pk3's sprites\.
@@ -167,15 +252,52 @@ std::vector<DoomVRMyWad> DoomVR_MyWads()
 	std::vector<FileSys::FileListEntry> found;
 	if (!FileSys::ScanDirectory(found, MyWadsDir().GetChars(), "*", false)) return out;
 	std::sort(found.begin(), found.end(), [](const auto& a, const auto& b) { return stricmp(a.FilePathRel.c_str(), b.FilePathRel.c_str()) < 0; });
+	// A mod left as a folder is one row, the folder itself: the game reads a
+	// folder as it reads a pk3. What is inside it is the mod's own, not rows -
+	// its maps\*.wad used to come up, and played as the plain game.
+	auto relOf = [](const FileSys::FileListEntry& f) { std::string r = f.FilePathRel; for (auto& c : r) if (c == '\\') c = '/'; return r; };
+	auto parentOf = [](const std::string& rel) { const size_t s = rel.find_last_of('/'); return s == std::string::npos ? std::string() : rel.substr(0, s); };
+	auto nameOf = [](const std::string& rel) { const size_t s = rel.find_last_of('/'); return s == std::string::npos ? rel : rel.substr(s + 1); };
+	std::vector<std::string> modDirs;
+	auto inMod = [&](const std::string& rel) {
+		return std::any_of(modDirs.begin(), modDirs.end(), [&](const std::string& d) { return rel.compare(0, d.size() + 1, d + "/") == 0; });
+	};
+	for (auto& f : found)
+		if (f.isDirectory && !inMod(relOf(f)) && IsModDir(f.FilePath)) modDirs.push_back(relOf(f));
 	for (auto& f : found)
 	{
-		if (f.isDirectory) continue;
-		std::string ext = f.FileName.substr(f.FileName.find_last_of('.') == std::string::npos ? f.FileName.size() : f.FileName.find_last_of('.'));
-		for (auto& c : ext) c = char(tolower((unsigned char)c));
-		if (ext != ".wad" && ext != ".pk3" && ext != ".pk7" && ext != ".zip") continue;
+		const std::string fileRel = relOf(f);
+		if (inMod(fileRel)) continue;
+		const bool isMod = f.isDirectory && std::find(modDirs.begin(), modDirs.end(), fileRel) != modDirs.end();
+		if (f.isDirectory && !isMod) continue;
+		std::string ext;
+		if (!isMod)
+		{
+			ext = f.FileName.substr(f.FileName.find_last_of('.') == std::string::npos ? f.FileName.size() : f.FileName.find_last_of('.'));
+			for (auto& c : ext) c = char(tolower((unsigned char)c));
+			if (ext != ".wad" && ext != ".pk3" && ext != ".pk7" && ext != ".zip") continue;
+		}
 		DoomVRMyWad w;
 		w.path = f.FilePath;
-		const std::string kind = MyWadScan(w.path, w.tags);
+		if (isMod)
+		{
+			// Beside its base mod, an add-on folder is not a game of its own.
+			const std::string name = nameOf(fileRel), parent = parentOf(fileRel);
+			if (std::any_of(modDirs.begin(), modDirs.end(), [&](const std::string& d) { return parentOf(d) == parent && IsAddOnOf(name, nameOf(d)); })) continue;
+			for (auto& g : found)
+			{
+				const std::string rel = relOf(g);
+				if (g.isDirectory && parentOf(rel) == parent && IsExtrasOf(nameOf(rel), name) && std::find(modDirs.begin(), modDirs.end(), rel) != modDirs.end())
+					w.more.push_back(g.FilePath);
+			}
+		}
+		const std::string kind = MyWadScan(w.path, w.tags, &w.unpack);
+		for (auto& m : w.more)
+		{
+			std::vector<std::string> extra;
+			MyWadScan(m, extra);
+			for (auto& t : extra) if (std::find(w.tags.begin(), w.tags.end(), t) == w.tags.end()) w.tags.push_back(t);
+		}
 		if (kind == "iwad") { Printf("DoomVR: My WADs: %s is a game's IWAD, not a WAD to add - left out\n", f.FilePathRel.c_str()); continue; }
 		w.maps = !kind.empty();
 		w.kind = kind == "doom1" ? "doom1" : "doom2";
@@ -200,6 +322,46 @@ std::vector<DoomVRMyWad> DoomVR_MyWads()
 		out.push_back(w);
 	}
 	return out;
+}
+
+std::vector<std::string> DoomVR_MyWadFiles(const DoomVRMyWad& w)
+{
+	std::vector<std::string> files;
+	if (w.unpack.empty())
+	{
+		files.push_back(w.path);
+		files.insert(files.end(), w.more.begin(), w.more.end());
+		return files;
+	}
+	// Beside My WADs, not in it: never a row, never in a save backup.
+	const std::string root = std::string((progdir + "My WADs unpacked/").GetChars()) + w.label + "/";
+	const std::string mark = root.substr(0, root.size() - 1) + ".txt";
+	long size = 0;
+	if (FILE* a = fopen(w.path.c_str(), "rb")) { fseek(a, 0, SEEK_END); size = ftell(a); fclose(a); }
+	long done = -1;
+	if (FILE* m = fopen(mark.c_str(), "rb")) { if (fscanf(m, "%ld", &done) != 1) done = -1; fclose(m); }
+	for (auto& n : w.unpack) files.push_back(root + n);
+	if (done == size) return files;
+	auto res = FResourceFile::OpenResourceFile(w.path.c_str(), true);
+	if (res == nullptr) { files.assign(1, w.path); return files; }
+	Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: My WADs: %s has the mod one folder down; unpacking it\n", w.label.c_str());
+	bool ok = true;
+	for (uint32_t i = 0; i < res->EntryCountU() && ok; ++i)
+	{
+		const char* full = res->getName(i);
+		if (full == nullptr) continue;
+		if (std::none_of(w.unpack.begin(), w.unpack.end(), [&](const std::string& n) { return strnicmp(full, n.c_str(), n.size()) == 0 && full[n.size()] == '/'; })) continue;
+		const std::string out = root + full;
+		CreatePath(out.substr(0, out.find_last_of('/')).c_str());
+		auto data = res->Read(i);
+		FILE* o = fopen(out.c_str(), "wb");
+		ok = o != nullptr;
+		if (o != nullptr) { ok = fwrite(data.data(), 1, data.size(), o) == data.size(); fclose(o); }
+	}
+	delete res;
+	if (!ok) { Printf("DoomVR: My WADs: could not unpack %s\n", w.label.c_str()); files.assign(1, w.path); return files; }
+	if (FILE* m = fopen(mark.c_str(), "wb")) { fprintf(m, "%ld\n", size); fclose(m); }
+	return files;
 }
 
 static const DoomVRMyWad* FindMyWad(const std::vector<DoomVRMyWad>& all, const char* label)
@@ -245,13 +407,13 @@ static std::vector<std::string> FindLaunchers()
 	amount and still centered, until its last row fits. A menu that had room
 	is left exactly as it was.
 */
-static void AddToMainMenu(FName menuName)
+static void AddToMainMenu(FName menuName, FName ours = "DoomVRSwitchGame", const char* label = "Switch Game", int hotkey = 'w')
 {
 	DMenuDescriptor** menu = MenuDescriptors.CheckKey(menuName);
 	if (menu == nullptr || *menu == nullptr || !(*menu)->IsKindOf(RUNTIME_CLASS(DListMenuDescriptor))) return;
 	auto ld = static_cast<DListMenuDescriptor*>(*menu);
 
-	const FName ours("DoomVRSwitchGame"), quitMenu("QuitMenu");
+	const FName quitMenu("QuitMenu");
 	int quit = -1;
 	for (unsigned i = 0; i < ld->mItems.Size(); ++i)
 	{
@@ -267,7 +429,7 @@ static void AddToMainMenu(FName menuName)
 
 	for (unsigned i = unsigned(quit); i < ld->mItems.Size(); ++i)
 		if (ld->mItems[i]->mYpos >= y) ld->mItems[i]->mYpos += step;
-	DMenuItemBase* it = CreateListMenuItemText(x, y, step, 'w', "Switch Game", ld->mFont,
+	DMenuItemBase* it = CreateListMenuItemText(x, y, step, hotkey, label, ld->mFont,
 	                                           ld->mFontColor, ld->mFontColor2, ours, 0);
 	ld->mItems.Insert(unsigned(quit), it);
 	GC::WriteBarrier(ld, it);
@@ -319,6 +481,75 @@ void DoomVR_SwitchGameTick()
 
 void DoomVR_BuildBuildMenu();
 
+/*
+	A mod's own keys, in the menu. A mod like DoomRPG does everything through
+	keys it names in KEYCONF (its menu, its shop, its skills) and a player in a
+	headset has no keyboard: without this the mod runs and looks like the plain
+	game. The page lists what the mod names; a row closes the menu and does it.
+	A held key (+user1) cannot be a row: it still takes a button, in Customize
+	Controls. A My WADs game also gets the page on the main menu, where its
+	player will look; the games we ship keep the main menu they were tested with.
+*/
+CCMD(vr_modkey)
+{
+	if (argv.argc() < 3) { Printf("vr_modkey <section> <row>\n"); return; }
+	const unsigned s = unsigned(atoi(argv[1])), a = unsigned(atoi(argv[2]));
+	if (s >= KeySections.Size() || a >= KeySections[s].mActions.Size()) return;
+	M_ClearMenus();
+	AddCommandString(KeySections[s].mActions[a].mAction.GetChars());
+}
+
+static void DoomVR_BuildModKeysMenu()
+{
+	DMenuDescriptor** menu = MenuDescriptors.CheckKey("DoomVRModKeys");
+	if (menu == nullptr || *menu == nullptr || !(*menu)->IsKindOf(RUNTIME_CLASS(DOptionMenuDescriptor))) return;
+	auto desc = static_cast<DOptionMenuDescriptor*>(*menu);
+	desc->mItems.Clear();
+	int rows = 0;
+	bool held = false;
+	FString first;
+	for (unsigned s = 0; s < KeySections.Size(); ++s)
+	{
+		bool header = false;
+		for (unsigned a = 0; a < KeySections[s].mActions.Size(); ++a)
+		{
+			auto& act = KeySections[s].mActions[a];
+			if (act.mAction[0] == '+') { held = true; continue; }
+			if (!header)
+			{
+				if (rows > 0) desc->mItems.Push(CreateOptionMenuItemStaticText(" "));
+				desc->mItems.Push(CreateOptionMenuItemStaticText(KeySections[s].mTitle.GetChars(), 1));
+				if (first.IsEmpty()) first = KeySections[s].mTitle;
+				header = true;
+			}
+			FString cmd;
+			cmd.Format("vr_modkey %u %u", s, a);
+			desc->mItems.Push(CreateOptionMenuItemCommand(act.mTitle.GetChars(), cmd.GetChars(), true));
+			++rows;
+		}
+	}
+	if (held)
+	{
+		desc->mItems.Push(CreateOptionMenuItemStaticText(" "));
+		desc->mItems.Push(CreateOptionMenuItemStaticText("Keys you hold down go on a button: Customize Controls"));
+	}
+	DMenuDescriptor** vr = MenuDescriptors.CheckKey("DoomVROptions");
+	if (rows == 0 || vr == nullptr || *vr == nullptr || !(*vr)->IsKindOf(RUNTIME_CLASS(DOptionMenuDescriptor))) return;
+	// Its own name on the row: "Doom RPG", as the player knows it.
+	auto options = static_cast<DOptionMenuDescriptor*>(*vr);
+	auto row = CreateOptionMenuItemSubmenu(first.GetChars(), "DoomVRModKeys", 0);
+	options->mItems.Insert(0, row);
+	GC::WriteBarrier(options, row);
+	bool myWad = false;
+	for (int i = 1; i < Args->NumArgs(); ++i) if (stricmp(Args->GetArg(i), "+vr_book_game") == 0) myWad = true;
+	if (myWad)
+	{
+		AddToMainMenu("MainMenu", "DoomVRModKeys", first.GetChars(), 'k');
+		AddToMainMenu("MainMenuTextOnly", "DoomVRModKeys", first.GetChars(), 'k');
+	}
+	Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: this game's own keys: %d rows, under \"%s\"\n", rows, first.GetChars());
+}
+
 // Called from M_CreateMenus, after every MENUDEF has been parsed - so a mod
 // that brings its own menus cannot leave this page empty.
 // The simple Options menu (UZDoom's own, m_simpleoptions) by default: the full
@@ -336,6 +567,7 @@ void DoomVR_BuildSwitchGameMenu()
 	}
 	AddToMainMenu("MainMenu");
 	AddToMainMenu("MainMenuTextOnly");
+	DoomVR_BuildModKeysMenu();
 	DoomVR_BuildBuildMenu();
 
 	DMenuDescriptor** menu = MenuDescriptors.CheckKey("DoomVRSwitchGame");
@@ -677,7 +909,13 @@ CCMD(vr_switchgame)
 			for (auto& t : my->tags) brings.AppendFormat(" %s", t.c_str());
 			Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: My WADs: %s on %s; it brings:%s; Modern add-ons left out:%s\n",
 			       my->label.c_str(), my->launcher.c_str(), brings.IsEmpty() ? " nothing of its own" : brings.GetChars(), dropped.IsEmpty() ? " none" : dropped.GetChars());
-			for (const char* a : { "-file", my->path.c_str(), "+vr_current_game", my->label.c_str(), "+vr_book_game", my->launcher.c_str() })
+			for (auto& file : DoomVR_MyWadFiles(*my))
+			{
+				args.Push("-file");
+				args.Push(file.c_str());
+				shown.AppendFormat(" -file %s", file.c_str());
+			}
+			for (const char* a : { "+vr_current_game", my->label.c_str(), "+vr_book_game", my->launcher.c_str() })
 			{
 				args.Push(a);
 				shown.AppendFormat(" %s", a);
@@ -714,9 +952,13 @@ CCMD(vr_switchgame)
 	FString extra;
 	if (my != nullptr)
 	{
-		FString p = my->path.c_str();
-		p.Substitute("/", "\\");
-		extra.Format(" \"%s\" +vr_current_game \"%s\" +vr_book_game \"%s\"", p.GetChars(), my->label.c_str(), my->launcher.c_str());
+		for (auto& file : DoomVR_MyWadFiles(*my))
+		{
+			FString p = file.c_str();
+			p.Substitute("/", "\\");
+			extra.AppendFormat(" \"%s\"", p.GetChars());
+		}
+		extra.AppendFormat(" +vr_current_game \"%s\" +vr_book_game \"%s\"", my->label.c_str(), my->launcher.c_str());
 	}
 	line.Format("cmd.exe /c \"ping -n 4 127.0.0.1 >nul & call \"%s\"%s\"", winBat.GetChars(), extra.GetChars());
 	// The successor waits for THIS process to be gone before it starts
