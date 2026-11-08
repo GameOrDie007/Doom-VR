@@ -1693,11 +1693,17 @@ int DoomVR_WheelGather()
 			// The same gun twice: Legacy of Rust's Incinerator is Doom's
 			// PlasmaRifle drawing its art, and idkfa also gives id24res's own
 			// ID24Incinerator, which looks the same. One place on the ring,
-			// the one in hand if either is.
+			// the one in hand if either is. Only a real picture counts: packs
+			// that draw their guns on overlays (PSX Final Doom, Doom 64 CE)
+			// give every gun the same empty Ready frame, TNT1 A, and the ring
+			// showed only the gun in hand.
+			auto blank = [](const FState* st) {
+				return !st || unsigned(st->sprite) >= sprites.Size() || strnicmp(sprites[st->sprite].name, "TNT1", 4) == 0;
+			};
 			bool twin = false;
 			for (auto& o : gWheelGuns)
 			{
-				if (!o.ready || !g.ready || o.ready->sprite != g.ready->sprite || o.ready->Frame != g.ready->Frame) continue;
+				if (blank(o.ready) || blank(g.ready) || o.ready->sprite != g.ready->sprite || o.ready->Frame != g.ready->Frame) continue;
 				if (g.current) o = g;
 				twin = true;
 				break;

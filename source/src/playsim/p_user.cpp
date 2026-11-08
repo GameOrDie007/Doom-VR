@@ -1600,6 +1600,11 @@ bool DoomVR_ShotFromHand(AActor* t1, bool offhand, DAngle& angle, DAngle& pitch,
 CVAR(Bool, vr_shots_from_gun, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_shots_up, 0.06f, CVAR_GLOBALCONFIG)		// m above the controller's aim point
 CVAR(Float, vr_shots_ahead, 0.15f, CVAR_GLOBALCONFIG)	// m along the aim
+// Bolts carry your speed: a missile fired from the gun adds the player's own
+// movement, so while strafing the stream stays in line with the barrel, as a
+// real gun's would. Off by default: Doom's bolts do not, and so they land on
+// the red dot; carrying your speed, they drift off it while you move.
+CVAR(Bool, vr_shots_carry_speed, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(Float, vr_hunits_per_meter)
 EXTERN_CVAR(Float, vr_height_adjust)
 

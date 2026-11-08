@@ -8131,6 +8131,7 @@ AActor *P_SpawnPlayerMissile (AActor *source, double x, double y, double z,
 	}
 
 	// DoomVR: a player's missile from the hand (vr_shots_from_hand).
+	EXTERN_CVAR(Bool, vr_shots_carry_speed)
 	// Or only starting at the gun (vr_shots_from_gun), centred on the hand.
 	DVector3 handOrigin;
 	const bool hugger = (defaultobject->flags3 & (MF3_FLOORHUGGER | MF3_CEILINGHUGGER)) != 0;
@@ -8184,6 +8185,8 @@ AActor *P_SpawnPlayerMissile (AActor *source, double x, double y, double z,
 		MissileActor->Vel3DFromAngle(pitch, MissileActor->Speed);
 	}
 	if (ejected) MissileActor->Vel.Zero();
+	else if (fromHand && vr_shots_carry_speed && !hugger && source->player == &players[consoleplayer] && !netgame && !demoplayback && !demorecording)
+		MissileActor->Vel += source->Vel;	// vr_shots_carry_speed (p_user.cpp)
 
 	if (MissileActor->flags4 & MF4_SPECTRAL)
 	{

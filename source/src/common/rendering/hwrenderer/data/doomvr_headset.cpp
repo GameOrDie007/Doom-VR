@@ -201,6 +201,10 @@ CVAR(Bool, vr_weapon_bob, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_phys_holsters, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_phys_holster_lift, 0.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)	// m, seated reach: lifts both holsters, up to 0.2
 CVAR(Bool, vr_weapon_wheel, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)		// hold the turning stick's click
+// Hold the right grip and flick the right stick: up the next weapon, down the
+// one before (the flick's own items wait while the grip is held, and the
+// grip's binding comes only as a tap). Off by default.
+CVAR(Bool, vr_grip_stick_weapons, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_wheel_slowmo, 0.3f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)	// the game's speed while it is up (1: none)
 CVAR(Int, vr_wheel_debug, 0, 0)	// desk: 1 holds the click, 2+ lights slice N-2
 EXTERN_CVAR(Float, i_timescale)	// physical play: draw from the body
@@ -1003,6 +1007,8 @@ namespace
 	// the pad's D-pad down (invuse by default - use the selected item), down
 	// is D-pad right (invnext - select the next one). One key press per flick.
 	EKeyCodes gFlickKey = EKeyCodes(0);
+	bool gFlickWasWeapon = false;	// the flick held now changed weapons (vr_grip_stick_weapons)
+	bool gRGripRaw = false, gGripFlicked = false;
 
 	// The weapon tuner's clock and click edges (ReadControllers).
 	double gTuneLastMs = 0;
@@ -1171,8 +1177,9 @@ namespace
 		}
 		Stick(0, 0, LX, LY, KEY_VR_LSTICK_RIGHT);
 		Stick(0, 0, RX, RY, KEY_PAD_RTHUMB_RIGHT);
-		if (gFlickKey != 0) Joy_GenerateButtonEvent(false, gFlickKey);
+		if (gFlickKey != 0 && !gFlickWasWeapon) Joy_GenerateButtonEvent(false, gFlickKey);
 		gFlickKey = EKeyCodes(0);
+		gFlickWasWeapon = false;
 		Trigger(0, LT, KEY_VR_LTRIGGER);
 		Trigger(0, RT, KEY_VR_RTRIGGER);
 	}
@@ -1729,7 +1736,9 @@ namespace
 					squeeze that missed the front grip switched weapons. Only a tap - let go inside 0.25 s -
 					reaches the game then.
 				*/
-				const bool tapOnly = g == 0 && DoomVR_TwoHandGunHeld();
+				// With grip + flick weapon switching, the right grip held is
+				// the chord's, never its binding: only a tap reaches the game.
+				const bool tapOnly = (g == 0 && DoomVR_TwoHandGunHeld()) || (g == 1 && vr_grip_stick_weapons);
 				const double tapMs = tapOnly ? kGripTapOnlyMs : kGripChordWaitMs;
 				if (!down[g] && gGripHeld[g] > 0 && heldMs(g) <= tapMs && !gGripChord) gGripTap[g] = 2;
 				if (down[g] && gGripHeld[g] == 0) gGripSince[g] = gripNow;
@@ -1738,6 +1747,10 @@ namespace
 				if (gGripTap[g] > 0) --gGripTap[g];
 			}
 			if (gGripChord && !down[0] && !down[1]) gGripChord = false;
+			// A grip that changed weapons with a flick is never also a tap.
+			gRGripRaw = down[1] && vr_grip_stick_weapons;
+			if (gGripFlicked) { gGripTap[1] = 0; eff[1] = false; }
+			if (!down[1]) gGripFlicked = false;
 			if (holsterGrab) gGripTap[1] = 0;	// a holster grab is never also a tap
 			if (gTwoHandGrip || gMouthGrip) gGripTap[0] = 0;	// nor is a hand on the gun's front, or at the mouth
 			l.squeezeClick.down = eff[0] && !gTwoHandGrip && !gMouthGrip;
@@ -1931,8 +1944,15 @@ namespace
 			else if (gFlickKey != 0 && fabsf(fy) > 0.35f) want = gFlickKey; // still held
 			if (want != gFlickKey)
 			{
-				if (gFlickKey != 0) Joy_GenerateButtonEvent(false, gFlickKey);
-				if (want != 0) Joy_GenerateButtonEvent(true, want);
+				if (gFlickKey != 0 && !gFlickWasWeapon) Joy_GenerateButtonEvent(false, gFlickKey);
+				gFlickWasWeapon = false;
+				if (want != 0 && gRGripRaw && gamestate == GS_LEVEL)
+				{
+					// vr_grip_stick_weapons: right grip held, up the next gun, down the one before.
+					AddCommandString(want == KEY_VR_RSTICK_UP ? "weapnext" : "weapprev");
+					gFlickWasWeapon = gGripFlicked = true;
+				}
+				else if (want != 0) Joy_GenerateButtonEvent(true, want);
 				gFlickKey = want;
 			}
 		}
@@ -2018,6 +2038,12 @@ namespace
 			else if (c.CompareNoCase("rright") == 0) r.thumbstick.x = 1;
 			else if (c.CompareNoCase("rup") == 0) r.thumbstick.y = 1;
 			else if (c.CompareNoCase("rdown") == 0) r.thumbstick.y = -1;
+			// The right grip held, then the right stick pushed (vr_grip_stick_weapons).
+			else if (c.CompareNoCase("rgripup") == 0 || c.CompareNoCase("rgripdown") == 0)
+			{
+				r.squeeze = 1; r.squeezeClick.down = true;
+				if (NowMs() - gFakeStartMs >= 300.) r.thumbstick.y = (c[5] == 'u' || c[5] == 'U') ? 1.f : -1.f;
+			}
 			// The Steam Frame's buttons (f_a ... f_menu, f_idle for the layout
 			// alone): the hands are on the Frame's profile while it is held.
 			else if (c.Len() > 2 && (c[0] == 'f' || c[0] == 'F') && c[1] == '_')
@@ -2504,6 +2530,9 @@ bool DoomVR_WeaponMatrix(float cx, float cy, float sx, float sy, float out[16], 
 	tuned fit moves the gun.
 */
 CVAR(Bool, vr_weapon_kick, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+// Two hands on a gun hold it steady: no kick while the other hand grips its
+// front (vr_phys_twohand), so a long gun kicks only when fired one-handed.
+CVAR(Bool, vr_weapon_kick_steady_twohand, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 /*
 	Physical play, melee by swinging: a hand moving
@@ -2845,6 +2874,7 @@ namespace
 			k.position = { aim.position.x + f.x, aim.position.y + f.y, aim.position.z + f.z };
 			return k;
 		}
+		if (gTwoHanded && vr_weapon_kick_steady_twohand) return aim;
 		const double a = KickShape(25, 160);
 		if (a <= 0) return aim;
 		const double back = 0.035 * a, pitch = 7.0 * a * kToRad;
@@ -3062,8 +3092,12 @@ bool DoomVR_HandPointPose(int hand, const double p[3], double& right, double& up
 	if (!DoomVR_Active() || !gCentered) return false;
 	const pcvrxr::HandState& h = Hand(hand == 0 ? pcvrxr::Hand::Right : pcvrxr::Hand::Left);
 	if (!h.active) return false;
-	const pcvrxr::Vec3 o = Rotate(h.aim.orientation, p[0], p[1], p[2]);
-	FromOrigin({ h.aim.position.x + o.x, h.aim.position.y + o.y, h.aim.position.z + o.z }, right, up, forward);
+	// Two hands on the gun: the gun is where the two-hand aim puts it, not
+	// where the back controller points (held across the body, that is well
+	// to the left: a player saw the shots start at the left shoulder).
+	const pcvrxr::Pose& aim = hand == 0 && gTwoHanded ? gAimPose : h.aim;
+	const pcvrxr::Vec3 o = Rotate(aim.orientation, p[0], p[1], p[2]);
+	FromOrigin({ aim.position.x + o.x, aim.position.y + o.y, aim.position.z + o.z }, right, up, forward);
 	right -= gCarried[0];
 	forward -= gCarried[1];
 	return true;
@@ -3074,7 +3108,8 @@ bool DoomVR_HandPose(int hand, double& right, double& up, double& forward, doubl
 	if (!DoomVR_Active() || !gCentered) return false;
 	const pcvrxr::HandState& h = Hand(hand == 0 ? pcvrxr::Hand::Right : pcvrxr::Hand::Left);
 	if (!h.active) return false;
-	FromOrigin(h.aim.position, right, up, forward);
+	const pcvrxr::Pose& aim = hand == 0 && gTwoHanded ? gAimPose : h.aim;	// as DoomVR_HandPointPose
+	FromOrigin(aim.position, right, up, forward);
 	// The body has carried part of the walk (room-scale): the hand is that
 	// much nearer the pawn.
 	right -= gCarried[0];
@@ -3082,7 +3117,7 @@ bool DoomVR_HandPose(int hand, double& right, double& up, double& forward, doubl
 	const double half = vr_weapon_tilt * 0.5 * kToRad;
 	const pcvrxr::Quat tilt{ float(sin(half)), 0, 0, float(cos(half)) };
 	double y, p, r;
-	ToYawPitchRoll(QuatMul(h.aim.orientation, tilt), y, p, r);
+	ToYawPitchRoll(QuatMul(aim.orientation, tilt), y, p, r);
 	yawDeg = (y - gOriginYaw) * kToDeg;
 	pitchDeg = p * kToDeg;
 	rollDeg = -r * kToDeg;
@@ -3830,6 +3865,7 @@ CCMD(vr_debug_space_change)
 // Hold one control on made-up controllers for N frames (default 20), then
 // release it: vr_debug_input rtrigger 30. Controls: a b x y menu lgrip rgrip
 // lclick rclick ltrigger rtrigger lup lrun lrunright ldown lleft lright rleft rright rup
+// rgripup rgripdown
 // (lrun: the left stick forward and clicked in).
 CCMD(vr_debug_input)
 {
