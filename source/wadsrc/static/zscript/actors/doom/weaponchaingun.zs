@@ -100,6 +100,7 @@ extend class StateProvider
 		}
 		player.mo.PlayAttacking2 ();
 
-		GunShot (!player.refire, "BulletPuff", BulletSlope ());
+		// DoomVR: vr_no_spread - see A_FirePistol.
+		GunShot (!player.refire || GetCVar("vr_no_spread"), "BulletPuff", BulletSlope ());
 	}
 }

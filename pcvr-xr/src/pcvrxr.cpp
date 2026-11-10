@@ -828,6 +828,7 @@ bool Session::ExitRequested() const { return m->exitRequested; }
 bool Session::IsVisible() const {
     return m->state == XR_SESSION_STATE_VISIBLE || m->state == XR_SESSION_STATE_FOCUSED;
 }
+bool Session::IsFocused() const { return m->state == XR_SESSION_STATE_FOCUSED; }
 unsigned Session::SpaceGeneration() const { return m->spaceGeneration; }
 
 void Session::SimulateSpaceChange() {

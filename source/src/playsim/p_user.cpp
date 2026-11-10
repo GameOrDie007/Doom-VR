@@ -1605,6 +1605,9 @@ CVAR(Float, vr_shots_ahead, 0.15f, CVAR_GLOBALCONFIG)	// m along the aim
 // real gun's would. Off by default: Doom's bolts do not, and so they land on
 // the red dot; carrying your speed, they drift off it while you move.
 CVAR(Bool, vr_shots_carry_speed, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+// DoomVR: pistol and chaingun fire where the gun points, with no random sideways miss (shotguns keep their pellet
+// pattern). Server info so every player in a net game fires the same way.
+CVAR(Bool, vr_no_spread, true, CVAR_ARCHIVE | CVAR_SERVERINFO | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(Float, vr_hunits_per_meter)
 EXTERN_CVAR(Float, vr_height_adjust)
 

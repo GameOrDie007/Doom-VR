@@ -117,10 +117,26 @@ void Draw2D(F2DDrawer* drawer, FRenderState& state, int x, int y, int width, int
 		{
 			// scissor test doesn't use the current viewport for the coordinates, so use real screen coordinates
 			// Note that the origin here is the lower left corner!
-			sciX = screen->ScreenToWindowX(cmd.mScissor[0]);
-			sciY = screen->ScreenToWindowY(cmd.mScissor[3]);
-			sciW = screen->ScreenToWindowX(cmd.mScissor[2]) - sciX;
-			sciH = screen->ScreenToWindowY(cmd.mScissor[1]) - sciY;
+			// DoomVR: drawn into a target other than the window (the headset's
+			// 1920x1080 menu panel), the clip is in that target's pixels. In
+			// the window's, a window narrower than the panel (a Quest 2's)
+			// cut the right of every menu off.
+			const auto& sv = screen->mScreenViewport;
+			if (x != sv.left || y != sv.top || width != sv.width || height != sv.height)
+			{
+				const float fx = width / (float)drawer->GetWidth(), fy = height / (float)drawer->GetHeight();
+				sciX = x + (int)round(cmd.mScissor[0] * fx);
+				sciY = y + height - (int)round(cmd.mScissor[3] * fy);
+				sciW = x + (int)round(cmd.mScissor[2] * fx) - sciX;
+				sciH = y + height - (int)round(cmd.mScissor[1] * fy) - sciY;
+			}
+			else
+			{
+				sciX = screen->ScreenToWindowX(cmd.mScissor[0]);
+				sciY = screen->ScreenToWindowY(cmd.mScissor[3]);
+				sciW = screen->ScreenToWindowX(cmd.mScissor[2]) - sciX;
+				sciH = screen->ScreenToWindowY(cmd.mScissor[1]) - sciY;
+			}
 			// If coordinates turn out negative, clip to sceen here to avoid undefined behavior.
 			if (sciX < 0) sciW += sciX, sciX = 0;
 			if (sciY < 0) sciH += sciY, sciY = 0;

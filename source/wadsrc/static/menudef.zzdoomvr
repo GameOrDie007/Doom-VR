@@ -181,6 +181,7 @@ OptionMenu "DoomVRHands" protected
 	Option "Instant weapon switch", "vr_instant_switch", "OnOff"
 	Option "Shots start at the gun, not the body", "vr_shots_from_gun", "OnOff"
 	Option "Shots leave the gun (for VR weapon mods)", "vr_shots_from_hand", "OnOff"
+	Option "Bullets go where you aim (no random miss)", "vr_no_spread", "OnOff"
 	Option "Bolts carry your speed (in line with the gun when strafing)", "vr_shots_carry_speed", "OnOff"
 	StaticText " "
 	Option "Weapon wheel (hold the right stick's click)", "vr_weapon_wheel", "OnOff"

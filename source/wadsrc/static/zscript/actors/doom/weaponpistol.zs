@@ -111,7 +111,9 @@ extend class StateProvider
 			}
 			player.mo.PlayAttacking2 ();
 
-			accurate = !player.refire;
+			// DoomVR: vr_no_spread (on by default) - a laser-dot crosshair shows exactly where the gun points, so the
+			// random sideways miss on held fire reads as broken aim in VR. Every shot goes where the gun points.
+			accurate = !player.refire || GetCVar("vr_no_spread");
 		}
 		else
 		{

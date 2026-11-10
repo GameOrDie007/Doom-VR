@@ -329,6 +329,12 @@ public:
     // whole head height too high, and hangs its menus on the floor.
     bool IsVisible() const;
 
+    // The session is FOCUSED: the player's input comes to this application.
+    // It drops to VISIBLE while the runtime takes the controllers (its dashboard,
+    // the Quest's Meta button, or SteamVR on a Steam Frame keeping View/Menu for
+    // itself): a port opens its own pause menu on that drop, as VR games do.
+    bool IsFocused() const;
+
     // Starts at 0 and goes up by one every time the runtime moves the
     // reference space (its own recenter, or a streaming runtime settling its
     // floor): every pose from then on is measured from somewhere new. A port

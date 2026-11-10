@@ -528,6 +528,33 @@ function Frame-SetRefresh([int] $hz) {
     if (-not $FrameFacts['VRCMD']) { Log '  SteamVR''s tool (vrcmd) is not on the Frame; the refresh rate was not set'; return }
     $r = Ssh ('/opt/steamvr/bin/linuxarm64/vrcmd --set-settings-float steam.app.' + $FrameAppId + '.preferredRefreshRate ' + $hz + ' 2>&1') 60
     Log ('  SteamVR refresh rate for the game: ' + $hz + ' Hz (' + ($r.Out + $r.Err).Trim() + ')')
+    # vrcmd's change lives in the running SteamVR only, until SteamVR saves its settings: a
+    # player's Doom VR ran at 72 Hz hours after Setup had set 90 this way (SteamVR restarted
+    # in between).  So the same value goes into SteamVR's settings file as well.
+    $py = @'
+import json, os, sys
+app, hz = sys.argv[1], float(sys.argv[2])
+p = os.path.expanduser("~/.config/openvr/config/steamvr.vrsettings")
+try:
+    with open(p) as f: s = json.load(f)
+except FileNotFoundError:
+    s = {}
+except Exception as e:
+    print("NOT WRITTEN: the file could not be read (%s)" % e); sys.exit(0)
+sec = s.setdefault("steam.app." + app, {})
+if sec.get("preferredRefreshRate") == hz:
+    print("SAVED (already)"); sys.exit(0)
+sec["preferredRefreshRate"] = hz
+os.makedirs(os.path.dirname(p), exist_ok=True)
+if os.path.exists(p) and not os.path.exists(p + ".gameordie-backup"):
+    import shutil; shutil.copy2(p, p + ".gameordie-backup")
+with open(p + ".tmp", "w") as f: json.dump(s, f, indent=3)
+os.replace(p + ".tmp", p)
+print("SAVED")
+'@
+    $b64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($py.Replace("`r", '')))
+    $w = Ssh ('echo ' + $b64 + ' | base64 -d > /tmp/gameordie-refresh.py && python3 /tmp/gameordie-refresh.py ' + $FrameAppId + ' ' + $hz + ' 2>&1; rm -f /tmp/gameordie-refresh.py') 60
+    Log ('  ...and in SteamVR''s settings file: ' + ($w.Out + $w.Err).Trim())
 }
 
 # Starts the game through the Frame's Steam, as the library would.

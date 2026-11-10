@@ -761,7 +761,15 @@ namespace
 		// The compositor's quality supersampling and sharpening on the world:
 		// a Quest's recommended eye buffer is below its panel, and this is how
 		// its own apps stay crisp without paying for a bigger one.
-		cfg.compositorQuality = true;
+		// Not on a Quest 2: its older chip pays for it at 90 Hz. Its log
+		// showed the game done in 4 ms of an 11 ms frame and still held to
+		// 77 fps, waiting on the compositor. The Quest 3 and the Frame keep it.
+		{
+			const char* dev = getenv("DOOMVR_DEVICE");
+			const bool quest2 = dev && strstr(dev, "Quest 2");
+			cfg.compositorQuality = !quest2;
+			if (quest2) Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: a Quest 2 - no compositor supersampling, so it holds 90 Hz\n");
+		}
 #endif
 		// The Game Tome's layer, when it is installed beside the game.
 #ifdef __ANDROID__
@@ -1647,6 +1655,20 @@ namespace
 	void ReadControllers()
 	{
 		if (!gBindsChecked) { gBindsChecked = true; VRDefaultBinds(); FrameDefaultBinds(); }
+		// SteamVR on a Steam Frame keeps the View and Menu buttons for itself most of the
+		// time: the press never reaches us and the session drops from FOCUSED to VISIBLE.
+		// Losing the focus during play opens our menu (as the Quest's Meta button pauses a
+		// VR game), so on every headset the menu is one press away and the game waits.
+		{
+			static bool wasFocused = false;
+			const bool focused = gSession->IsFocused();
+			if (wasFocused && !focused && gamestate == GS_LEVEL && menuactive == MENU_Off)
+			{
+				Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: the headset took the focus - the menu opened\n");
+				AddCommandString("menu_main");
+			}
+			wasFocused = focused;
+		}
 		gSession->SetSwapHands(Leftorium());
 		TomeKeep(Tome());
 		pcvrxr::HandState l = Hand(pcvrxr::Hand::Left);

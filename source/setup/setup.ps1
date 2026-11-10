@@ -974,6 +974,59 @@ if ((Test-Path -LiteralPath $bd64) -and -not (Test-Path -LiteralPath $bd64Fix)) 
 }
 
 # ---------------------------------------------------------------------------
+# Voxel Doom's models for the PlayStation games (PSX Doom CE, PSX Final Doom
+# CE). Voxel Doom's own code replaces Doom's monsters, and so do the CE games,
+# so the whole mod cannot load with them. Made here from the player's own copy:
+# its voxels and VOXELDEF only (Doom II's half moved out of its filter folder),
+# with its licence and readme - no code, materials or menus. The voxels attach
+# by sprite name, which the CE games keep, and the CE monsters keep their own
+# behaviour. Nothing of the mod's is shipped.
+# ---------------------------------------------------------------------------
+$vdSrc = PathOf "mods\VoxelDoom_v2.4.pk3"
+$vdOut = PathOf "mods\doomvr-voxeldoom-models.pk3"
+if ((Test-Path -LiteralPath $vdSrc) -and -not (Test-Path -LiteralPath $vdOut)) {
+    $vdTmp = $vdOut + ".part"
+    try {
+        Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+        if (Test-Path -LiteralPath $vdTmp) { Remove-Item -LiteralPath $vdTmp -Force }
+        $zin = [IO.Compression.ZipFile]::OpenRead($vdSrc)
+        $zout = [IO.Compression.ZipFile]::Open($vdTmp, "Create")
+        try {
+            $read = { param($e) $r = New-Object IO.StreamReader($e.Open()); try { $r.ReadToEnd() } finally { $r.Close() } }
+            $def = ""
+            $n = 0
+            foreach ($e in $zin.Entries) {
+                $f = $e.FullName
+                $to = $null
+                if ($f -like "voxels/*.kvx") { $to = $f }
+                elseif ($f -like "filter/doom.id.doom2/voxels/*.kvx") { $to = $f.Substring("filter/doom.id.doom2/".Length) }
+                elseif ($f -ieq "LICENSE" -or $f -ieq "readme.txt") { $to = $f }
+                if ($to) {
+                    $src = $e.Open()
+                    $dst = ($zout.CreateEntry($to, "Optimal")).Open()
+                    try { $src.CopyTo($dst) } finally { $dst.Close(); $src.Close() }
+                    if ($to -like "voxels/*") { $n++ }
+                }
+            }
+            foreach ($name in "VOXELDEF.txt", "filter/doom.id.doom2/VOXELDEF.txt") {
+                $e = $zin.Entries | Where-Object { $_.FullName -ieq $name } | Select-Object -First 1
+                # Without its sprites, which only its own code makes (the TEXTURES fake sprites and
+                # the Icon of Sin faces), leaving them in fills the game's log with errors.
+                if ($e) { $def += ((((& $read $e) -split "`r?`n") | Where-Object { $_ -notmatch '^\s*(VINV|VOUL|VINS|VISL|VEGA|VIL2|ZF\w\w)\w*\s*=' }) -join "`r`n") + "`r`n" }
+            }
+            $w = New-Object IO.StreamWriter(($zout.CreateEntry("VOXELDEF.txt")).Open())
+            $w.Write("// Cheello's Voxel Doom 2.4 - its voxels only, made by Doom VR setup for the PlayStation games.`r`n" + $def); $w.Close()
+        } finally { $zout.Dispose(); $zin.Dispose() }
+        if ($n -lt 100) { throw "only $n voxels found" }
+        Move-Item -LiteralPath $vdTmp -Destination $vdOut -Force
+        Say "Voxel Doom: its 3D models made ready for PSX Doom and PSX Final Doom ($n voxels)"
+    } catch {
+        if (Test-Path -LiteralPath $vdTmp) { Remove-Item -LiteralPath $vdTmp -Force -ErrorAction SilentlyContinue }
+        Say ("Voxel Doom for the PlayStation games: left out - " + $_.Exception.Message)
+    }
+}
+
+# ---------------------------------------------------------------------------
 # DOOM 64 CE's IWAD: the player's DOOM64.WAD with CE's BPS patch applied.
 # bps.ps1 checks the source, the result and the patch against the CRCs the
 # patch carries, so a different release of the WAD is refused, not mangled.
@@ -1344,6 +1397,8 @@ function ModernFor($g) {
             else { $null }
     if ($onto) {
         $out = if ((Has $guns) -and (Has $onto)) { @($guns, $onto) } else { @() }
+        # The PlayStation games: Voxel Doom's models (made above), before the guns.
+        if ($onto -like "*psxce*" -and (Has "mods\doomvr-voxeldoom-models.pk3")) { $out = @("mods\doomvr-voxeldoom-models.pk3") + $out }
         if ($onto -like "*brutaldoom64*" -and (Has "mods\doomvr-bd64-statusbar.pk3")) { $out += "mods\doomvr-bd64-statusbar.pk3" }
         return $out
     }
