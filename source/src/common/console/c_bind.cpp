@@ -928,6 +928,8 @@ CCMD(binddefaults)
 //
 //=============================================================================
 
+const char* DoomVR_ModBind(int key);	// doomvr_headset.cpp
+
 bool C_DoKey(event_t *ev, FKeyBindings *binds, FKeyBindings *doublebinds)
 {
 	if ((ev->type != EV_KeyDown && ev->type != EV_KeyUp) || (unsigned int)ev->data1 >= NUM_KEYS)
@@ -1005,6 +1007,10 @@ bool C_DoKey(event_t *ev, FKeyBindings *binds, FKeyBindings *doublebinds)
 		binding = binds->GetBinding(key);
 		isDoubleClick = false;
 	}
+
+	// DoomVR: a mod's own command on a controller button it leaves free.
+	if (binds == &Bindings)
+		if (const char* over = DoomVR_ModBind(key)) { binding = over; isDoubleClick = false; }
 
 	if (isKeyUp && (binding.Len() == 0 || binding[0] != '+'))
 	{

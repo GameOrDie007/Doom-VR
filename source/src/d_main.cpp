@@ -388,6 +388,10 @@ void DoomVR_ReloadUserShaders();	// gl_framebuffer.cpp: a switched game's own ma
 void DoomVR_ModelsForgetGame();	// DoomVR: models and voxels let go at a restart
 void DoomVR_RestartFrame();	// DoomVR: a headset frame while the engine restarts into another game
 void DoomVR_LoadKeepAlive();	// DoomVR: Windows answered and the headset fed between shader compiles
+bool DoomVR_RunNetLobby();		// doomvr_multiplayer.cpp: the lobby in the game, after the Multiplayer menu's restart
+void DoomVR_NetStartMap();
+bool DoomVR_DrawNetLobby();
+bool DoomVR_NetLobbyUp();
 
 // EXTERNAL DATA DECLARATIONS ----------------------------------------------
 
@@ -1325,6 +1329,11 @@ void D_Display ()
 		switch (gamestate)
 		{
 			case GS_FULLCONSOLE:
+				if (DoomVR_DrawNetLobby())	// DoomVR: the Multiplayer menu's lobby
+				{
+					End2DAndUpdate ();
+					return;
+				}
 				D_PageDrawer();
 				C_DrawConsole ();
 				M_Drawer ();
@@ -3155,6 +3164,14 @@ static bool System_DisableAnisotropicFiltering()
 
 static void System_OnScreenSizeChanged()
 {
+	// DoomVR: in the Multiplayer lobby no level or game data is loaded yet (it
+	// runs on a restart), so nothing here may be touched. The crosshair loads
+	// again when it is next drawn; the status bar and automap come with the level.
+	if (DoomVR_NetLobbyUp())
+	{
+		ST_UnloadCrosshair();
+		return;
+	}
 	if (StatusBar != NULL)
 	{
 		StatusBar->CallScreenSizeChanged();
@@ -3591,6 +3608,22 @@ static int D_InitGame(const FIWADInfo* iwad_info, std::vector<FileSys::ResourceN
 		std::make_move_iterator(pwads.end())
 	);
 
+	// DoomVR: Game Or Die's look-only packs - the 3D and voxel guns (models and
+	// their MODELDEF, nothing else), the hands, the Switch Game covers - are
+	// left out of co-op's file check, as -optfile files are. Each player picks
+	// their own gun style and detail, and setup makes the voxel guns and hands
+	// from that machine's own game files, so they differ from player to player
+	// and never change the game: a host with voxel guns refused a friend with
+	// the 3D guns.  Mods that change the game (gore,
+	// monsters, maps) are still checked.
+	for (auto& w : allwads)
+	{
+		FString base = ExtractFileBase(w.Name.c_str(), true);
+		base.ToLower();
+		if (base.IndexOf("doomvr-weapons-") == 0 || base.IndexOf("doomvr-voxel-weapons-") == 0 || base.Compare("hands.pk3") == 0 || base.Compare("boxart.pk3") == 0)
+			w.bOptional = true;
+	}
+
 	bool allowduplicates = Args->CheckParm(FArg_allowduplicates);
 	if (!fileSystem.InitMultipleFiles(allwads, &lfi, FileSystemPrintf, allowduplicates))
 	{
@@ -3921,6 +3954,16 @@ static int D_InitGame(const FIWADInfo* iwad_info, std::vector<FileSys::ResourceN
 	}
 
 	// [RH] Run any saved commands from the command line or autoexec.cfg now.
+	// DoomVR: hosted or joined from the Multiplayer menu - the game restarted in
+	// this process with -host or -join, so the lobby runs here, in the game
+	// (doomvr_multiplayer.cpp), not in the startup's desktop window.
+	bool doomvrNetStart = false;
+	if (restart && !norun && (Args->CheckParm(FArg_host) || Args->CheckParm(FArg_join)))
+	{
+		DoomVR_NetStartMap();
+		doomvrNetStart = DoomVR_RunNetLobby();
+	}
+
 	gamestate = GS_FULLCONSOLE;
 	Net_Initialize();
 	C_RunDelayedCommands();
@@ -4040,6 +4083,24 @@ static int D_InitGame(const FIWADInfo* iwad_info, std::vector<FileSys::ResourceN
 	{
 		// These calls from inside V_Init2 are still necessary
 		C_NewModeAdjust();
+		const char* netLoad = doomvrNetStart ? Args->CheckValue(FArg_loadgame) : nullptr;
+		if (netLoad != nullptr)
+		{
+			// DoomVR: Host a Game carrying on from a co-op save (the joiners
+			// were sent its name in the lobby): everyone loads it, as a
+			// -host/-loadgame start does. The lobby already checked it is here.
+			G_LoadGame(G_BuildSaveName(netLoad).GetChars());
+		}
+		else if (doomvrNetStart)
+		{
+			// DoomVR: the network game from the Multiplayer menu starts on the
+			// host's map, as a -host/-join start does.
+			NoWipe = TICRATE;
+			CheckWarpTransMap(startmap, true);
+			G_InitNew(startmap.GetChars(), false);
+			gameaction = ga_mapwarp;
+		}
+		else
 		D_StartTitle ();				// start up intro loop
 		setmodeneeded = false;			// This may be set to true here, but isn't needed for a restart
 	}

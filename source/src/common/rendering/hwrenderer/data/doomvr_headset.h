@@ -14,6 +14,7 @@
 #pragma once
 
 #include "name.h"
+#include "vectors.h"
 
 // vr_mode value for a headset. UZDoom's own modes stop at 14; this one is
 // deliberately clear of them.
@@ -66,6 +67,11 @@ void DoomVR_EyeSize(int& width, int& height);
 // Column-major projection for one eye, from the runtime's own asymmetric field
 // of view - not the game's fov setting, which describes a monitor.
 void DoomVR_EyeProjection(int eye, float nearZ, float farZ, float out[16]);
+// The co-op lobby's starfield, drawn into the eyes (the lobby has no level):
+// where each star falls in one eye's picture, as squares of w x h pixels, y up
+// as GL's are. -1 when the lobby is not up (the eye is left as it is).
+struct DoomVR_StarRect { int x, y, size; float bright; };
+int DoomVR_LobbyStars(int eye, int width, int height, DoomVR_StarRect* out, int max);
 
 // How ONE eye looks and where it sits, for the render loop to apply to that
 // eye's copy of the viewpoint - never to the player's own angles, which drive
@@ -257,6 +263,29 @@ bool DoomVR_GetAim(double& yawOffset, double& pitch);
 // headset. "Use" (doors, switches) acts along it: you press A at what you are
 // looking at.
 bool DoomVR_GetLookYaw(double& yawOffset);
+
+// The head's yaw relative to the body and its pitch (Doom's way: positive
+// looking down), degrees; false with no headset. The player's own actor code
+// (a mod's PlayerPawn.Tick) sees the body turned and tilted this way, as it
+// would see the mouse look on a monitor: Doom Infinite's "look at a gun and
+// press Use" traces from the pawn's angle and pitch.
+bool DoomVR_GetLook(double& yawOffset, double& pitch);
+
+// In the headset, out of the menus: the controller's button bound to cmd
+// first, for mods' Bindings.GetKeysForCommand (see the .cpp).
+void DoomVR_ControllerKeyFirst(const char* cmd, int& k1, int& k2);
+
+class AActor;
+// The way the player's own actor faces while it ticks: the head, else what
+// the right controller points at (p_user.cpp). False with no headset.
+bool DoomVR_PawnLook(AActor* mo, DAngle& yaw, DAngle& pitch);
+// Walk onto a mod's point-and-Use gun and it is picked up (p_user.cpp).
+void DoomVR_ModWalkOver(AActor* mo);
+// Doom Infinite is loaded (its event handler class exists).
+bool DoomVR_IsDoomInfinite();
+// Doom Infinite's own key numbers for its touch input, read from its scripts (they change between its builds).
+struct DoomVRModKeys { int use, up, down, left, right; };
+extern DoomVRModKeys DoomVR_DIKeys;
 
 // Which eye the render loop is drawing, for the weapon's matrix.
 void DoomVR_SetDrawingEye(int eye);

@@ -43,6 +43,7 @@ EXTERN_CVAR(Float, vr_hunits_per_meter)
 // that is not being worn - or no headset at all - never turns, so without
 // these there is no way to ask "does the view follow the head, and which way"
 // from a desk. Not archived: a test value must not survive into a play session.
+CVAR(Int, vr_eye_flip, 0, 0)	// Steam Frame diagnostic: 1 turns the eye pictures over on their way to the runtime
 CVAR(Float, vr_debug_yaw, 0.f, 0)
 CVAR(Float, vr_debug_pitch, 0.f, 0)
 CVAR(Float, vr_debug_roll, 0.f, 0)
@@ -768,6 +769,9 @@ namespace
 			const char* dev = getenv("DOOMVR_DEVICE");
 			const bool quest2 = dev && strstr(dev, "Quest 2");
 			cfg.compositorQuality = !quest2;
+			// The eyes go as drawn (the Frame's panels show what the swapchain holds);
+			// +vr_eye_flip 1 turns them over, for a desk check only.
+			cfg.flipEyes = vr_eye_flip;
 			if (quest2) Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: a Quest 2 - no compositor supersampling, so it holds 90 Hz\n");
 		}
 #endif
@@ -898,7 +902,7 @@ namespace
 	// recenter direction (so, to the body), in UZDoom's senses: degrees, yaw
 	// positive left, pitch positive down. gAimValid is false when the right
 	// controller is not there.
-	double gLookYaw = 0, gAimYaw = 0, gAimPitch = 0;
+	double gLookYaw = 0, gLookPitch = 0, gAimYaw = 0, gAimPitch = 0;
 	bool gAimValid = false;
 
 	// The panel's placement: whether it is showing a screen (menu, console,
@@ -2255,6 +2259,7 @@ void DoomVR_BeginFrame()
 	}
 	gMoveYaw = (yaw - gOriginYaw) * kToDeg;
 	gLookYaw = gMoveYaw;
+	gLookPitch = -pitch * kToDeg;
 	{
 		const pcvrxr::HandState& right = Hand(pcvrxr::Hand::Right);
 		gAimValid = right.active;
@@ -2408,7 +2413,9 @@ bool DoomVR_BeginPanel(int canvasWidth, int canvasHeight, int& width, int& heigh
 
 	// Not a level (title picture, intermission, text screens): there is no
 	// world to show, and what is in the eyes is whatever was left there.
-	if (!level) gSession->SuppressWorld();
+	// The co-op lobby is no level either, but its starfield is in the eyes.
+	bool DoomVR_NetLobbyUp();
+	if (!level && !DoomVR_NetLobbyUp()) gSession->SuppressWorld();
 
 	gSession->BeginPanel();
 	gSession->PanelSize(width, height);
@@ -3442,6 +3449,14 @@ bool DoomVR_GetLookYaw(double& yawOffset)
 	return true;
 }
 
+bool DoomVR_GetLook(double& yawOffset, double& pitch)
+{
+	if (!DoomVR_Active() || !gCentered) return false;
+	yawOffset = gLookYaw;
+	pitch = gLookPitch;
+	return true;
+}
+
 double DoomVR_ViewBob()
 {
 	return DoomVR_Active() && !vr_view_bob ? 0.0 : 1.0;
@@ -3557,6 +3572,88 @@ void DoomVR_EyeSize(int& width, int& height)
 void DoomVR_EyeProjection(int eye, float nearZ, float farZ, float out[16])
 {
 	pcvrxr::ProjectionMatrix(gSession->GetView(eye).fov, nearZ, farZ, out);
+}
+
+/*
+	The co-op lobby's starfield, all round the player: stars in a block of
+	space 80 m a side, drifting slowly past from the way the lobby faces (as if
+	the player were moving gently forward through it), each wrapping round to
+	the far side when it has gone by. Real places in the room, so both eyes see
+	them at their depth and they stay put as the head turns. None closer than
+	3 m, so none passes between the eyes and the lobby's panel (2 m away).
+	Only positions and sizes here: the renderer draws them (no shader needed).
+*/
+int DoomVR_LobbyStars(int eye, int width, int height, DoomVR_StarRect* out, int max)
+{
+	bool DoomVR_NetLobbyUp();
+	static bool was = false;
+	if (!DoomVR_NetLobbyUp() || !gUp || width <= 0 || height <= 0) { was = false; return -1; }
+	constexpr int kStars = 700;
+	constexpr float kHalf = 40.f;	// metres
+	struct Star { float x, y, z; };
+	static Star stars[kStars];
+	static float cx, cy, cz, fx, fz;	// the block's centre and the way the stars come from
+	static double lastMs = 0;
+	static uint32_t rng = 0x2545F491u;
+	auto rnd = [] { rng = rng * 1664525u + 1013904223u; return float(rng >> 8) / float(1u << 24); };
+	const double now = NowMs();
+	if (!was)
+	{
+		// A new lobby: the field round where the head is, coming from where it looks.
+		const pcvrxr::Pose& head = gSession->Head();
+		double yaw, pitch, roll;
+		ToYawPitchRoll(head.orientation, yaw, pitch, roll);
+		cx = head.position.x; cy = head.position.y; cz = head.position.z;
+		fx = float(-sin(yaw)); fz = float(-cos(yaw));
+		for (auto& st : stars) { st.x = (rnd() * 2 - 1) * kHalf; st.y = (rnd() * 2 - 1) * kHalf; st.z = (rnd() * 2 - 1) * kHalf; }
+		lastMs = now;
+		was = true;
+	}
+	// Moved once a frame (on the first eye), half a metre a second.
+	if (eye == 0)
+	{
+		const float dt = float(std::clamp((now - lastMs) / 1000.0, 0.0, 0.1));
+		lastMs = now;
+		const float step = 0.5f * dt;
+		for (auto& st : stars)
+		{
+			st.x -= fx * step; st.z -= fz * step;
+			// Gone past: round to the far side of the block.
+			const float along = st.x * fx + st.z * fz;
+			if (along < -kHalf) { st.x += fx * 2 * kHalf; st.z += fz * 2 * kHalf; }
+		}
+	}
+	float view[16], proj[16];
+	pcvrxr::ViewMatrix(gSession->GetView(eye).pose, view);
+	pcvrxr::ProjectionMatrix(gSession->GetView(eye).fov, 0.05f, 200.f, proj);
+	const pcvrxr::Vec3& eyeAt = gSession->GetView(eye).pose.position;
+	int n = 0;
+	for (const auto& st : stars)
+	{
+		if (n >= max) break;
+		const float wx = cx + st.x, wy = cy + st.y, wz = cz + st.z;
+		const float dx = wx - eyeAt.x, dy = wy - eyeAt.y, dz = wz - eyeAt.z;
+		const float dist = sqrtf(dx * dx + dy * dy + dz * dz);
+		if (dist < 3.f || dist > kHalf * 1.1f) continue;
+		// view, then projection (column-major, as GL's)
+		const float vx = view[0] * wx + view[4] * wy + view[8] * wz + view[12];
+		const float vy = view[1] * wx + view[5] * wy + view[9] * wz + view[13];
+		const float vz = view[2] * wx + view[6] * wy + view[10] * wz + view[14];
+		const float px = proj[0] * vx + proj[4] * vy + proj[8] * vz + proj[12];
+		const float py = proj[1] * vx + proj[5] * vy + proj[9] * vz + proj[13];
+		const float pw = proj[3] * vx + proj[7] * vy + proj[11] * vz + proj[15];
+		if (pw <= 0.01f) continue;
+		const float nx = px / pw, ny = py / pw;
+		if (nx < -1 || nx > 1 || ny < -1 || ny > 1) continue;
+		// About 2 cm across: a few pixels near, one far off.
+		const int size = std::clamp(int(height * 0.012f * 6.f / dist), 1, 6);
+		DoomVR_StarRect& r = out[n++];
+		r.x = int((nx * 0.5f + 0.5f) * width) - size / 2;
+		r.y = int((ny * 0.5f + 0.5f) * height) - size / 2;
+		r.size = size;
+		r.bright = std::clamp(1.15f - dist / (kHalf * 1.1f), 0.25f, 1.f);
+	}
+	return n;
 }
 
 // A test switch: the vignette full on, standing still, so a picture with it
@@ -3837,6 +3934,8 @@ CCMD(vr_debug_key)
 		{ "downarrow", KEY_DOWNARROW }, { "pgup", KEY_PGUP }, { "pgdn", KEY_PGDN },
 		{ "home", KEY_HOME }, { "end", KEY_END }, { "ins", KEY_INS }, { "del", KEY_DEL },
 		{ "lbracket", 0x1a }, { "rbracket", 0x1b },
+		{ "vr_a", KEY_VR_A }, { "vrf_a", KEY_VRF_A }, { "e", 0x12 },
+		{ "enter", KEY_ENTER }, { "mouse1", KEY_MOUSE1 }, { "space", KEY_SPACE },
 	};
 	if (argv.argc() < 2) { Printf("vr_debug_key <leftarrow|rightarrow|uparrow|downarrow|pgup|pgdn|home|end|ins> [frames]\n"); return; }
 	int code = 0;
@@ -3868,11 +3967,197 @@ CCMD(vr_recenter)
 	gRecenterWhy = "asked";
 }
 
+/*
+	Mods that read a key, not the button. Doom Infinite's "point and press Use"
+	(weapon pickups, switches, its people) compares the key pressed with
+	Bindings.GetKeysForCommand("+use") - one number for the first two keys bound -
+	so with a keyboard key AND a controller button on Use, no key ever matches and
+	A does nothing. Its own touch-device switch reads the Use button instead:
+	on in the headset, as a player would have to find and set by hand.
+*/
+static void DoomVR_ModInputCompat()
+{
+	static const char* const kButtonInput[] = { "DI_TouchDeviceInput" };
+	for (const char* name : kButtonInput)
+	{
+		FBaseCVar* v = FindCVar(name, nullptr);
+		if (v == nullptr || v->GetRealType() != CVAR_Bool || v->GetGenericRep(CVAR_Bool).Bool) continue;
+		UCVarValue on;
+		on.Bool = true;
+		v->SetGenericRep(on, CVAR_Bool);
+		Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: %s on - this mod reads the Use button that way in the headset\n", name);
+	}
+}
+
+/*
+	A mod asking which key is on a command, while the player plays in the
+	headset, gets the controller's button first. ZScript's
+	Bindings.GetKeysForCommand gives the two lowest-numbered keys, and a mod
+	comparing "key pressed == GetKeysForCommand(...)" uses only the first:
+	keyboard E always came before A on Use, so Doom Infinite's "point and
+	press Use" (its weapons, gate, people) matched only E. Menus keep the
+	usual order.
+*/
+/*
+	A mod's own commands on controller buttons it leaves free, while that mod
+	is loaded and the player is in the headset - never written to the ini, so
+	the player's own bindings come back with the next game. Doom Infinite
+	(its DoomInfiniteHandler): it never reads reload, the right stick's flicks
+	or the Frame's View, and its tutorial waits on the mod screen.
+*/
+struct DoomVRModBind { int key; const char* cmd; };
+static const DoomVRModBind kDoomInfiniteBinds[] = {
+	{ KEY_VR_X, "di_modscreen" }, { KEY_VR_RSTICK_UP, "di_useitem_bind" }, { KEY_VR_RSTICK_DOWN, "di_showupgrades_bind" },
+	{ KEY_VRF_X, "di_modscreen" }, { KEY_VRF_RSTICK, "di_useitem_bind" }, { KEY_VRF_VIEW, "di_showupgrades_bind" },
+};
+
+bool DoomVR_IsDoomInfinite()
+{
+	// Looked up each time: Switch Game reloads every class, and a name lookup is cheap.
+	return PClass::FindClass("DoomInfiniteHandler") != nullptr;
+}
+
+// While the mod's own menu is open, the sticks (and the Frame's D-pad) move it.
+static const DoomVRModBind kDoomInfiniteMenuBinds[] = {
+	{ KEY_VR_LSTICK_UP, "vr_modmenu up" }, { KEY_VR_LSTICK_DOWN, "vr_modmenu down" },
+	{ KEY_VR_LSTICK_LEFT, "vr_modmenu left" }, { KEY_VR_LSTICK_RIGHT, "vr_modmenu right" },
+	{ KEY_VR_RSTICK_UP, "vr_modmenu up" }, { KEY_VR_RSTICK_DOWN, "vr_modmenu down" },
+	{ KEY_VRF_DPADUP, "vr_modmenu up" }, { KEY_VRF_DPADDOWN, "vr_modmenu down" },
+	{ KEY_VRF_DPADLEFT, "vr_modmenu left" }, { KEY_VRF_DPADRIGHT, "vr_modmenu right" },
+};
+bool DoomVR_ModMenuOpen();	// p_user.cpp
+
+const char* DoomVR_ModBind(int key)
+{
+	if (!DoomVR_Active() || !DoomVR_IsDoomInfinite()) return nullptr;
+	if (DoomVR_ModMenuOpen()) for (auto& b : kDoomInfiniteMenuBinds) if (b.key == key) return b.cmd;
+	for (auto& b : kDoomInfiniteBinds) if (b.key == key) return b.cmd;
+	return nullptr;
+}
+
+/*
+	Mod scripts that name keys from a table of their own, which stops at the
+	keyboard: given a controller's button they print "UNDEFINED", and their
+	prompts say "press M" for a key nobody in a headset has. The controller's
+	buttons are added to that table as the script is read, in memory on the
+	player's own PC - the mod's files are never changed or carried.
+	Doom Infinite: KeyMan.KeyCodeToBind (zscript/system/zmixins.zsc), behind
+	every prompt it shows (ACS asks it too, through ACSGetBind).
+*/
+/*
+	Doom Infinite's own key numbers, which its touch-device input takes
+	(DoomInfiniteHandler.ProcessTouchInput). They change between its builds
+	(demo 0.978.6: Use 14, Forward 10; 0.98 preview 2: Use 0, Forward 6), so
+	they are read from the mod's own key enum as its scripts are read, never
+	assumed. Left/right: the mod's own DIRLEFT/DIRRIGHT where it has them, else
+	LEFT/RIGHT, as its DetectTouchInput sends for a sideways press.
+*/
+DoomVRModKeys DoomVR_DIKeys = { 14, 10, 11, 12, 13 };	// demo 0.978.6, until a build's enum is read
+
+static void DoomVR_ReadModKeyEnum(const char* text, size_t len)
+{
+	std::string src(text, len);
+	for (size_t at = src.find("enum"); at != std::string::npos; at = src.find("enum", at + 4))
+	{
+		const size_t open = src.find('{', at), close = open == std::string::npos ? open : src.find('}', open);
+		if (close == std::string::npos) return;
+		std::string body = src.substr(open + 1, close - open - 1);
+		if (body.find("KEY_USE") == std::string::npos || body.find("KEY_FORWARD") == std::string::npos) continue;
+		for (size_t c = body.find("//"); c != std::string::npos; c = body.find("//", c))	// comments out, line by line
+			body.erase(c, body.find('\n', c) == std::string::npos ? std::string::npos : body.find('\n', c) - c);
+		for (size_t c = body.find("/*"); c != std::string::npos; c = body.find("/*", c))
+			body.erase(c, body.find("*/", c) == std::string::npos ? std::string::npos : body.find("*/", c) + 2 - c);
+		TMap<FName, int> values;
+		int next = 0;
+		size_t p = 0;
+		while (p < body.size())
+		{
+			size_t comma = body.find(',', p);
+			if (comma == std::string::npos) comma = body.size();
+			std::string item = body.substr(p, comma - p);
+			p = comma + 1;
+			std::string name, val;
+			const size_t eq = item.find('=');
+			name = item.substr(0, eq);
+			if (eq != std::string::npos) val = item.substr(eq + 1);
+			auto trim = [](std::string s) { size_t a = s.find_first_not_of(" \t\r\n"), b = s.find_last_not_of(" \t\r\n"); return a == std::string::npos ? std::string() : s.substr(a, b - a + 1); };
+			name = trim(name); val = trim(val);
+			if (name.empty()) continue;
+			if (!val.empty()) next = atoi(val.c_str());
+			values[FName(name.c_str())] = next++;
+		}
+		auto get = [&](const char* a, const char* b, int& out) { int* v = values.CheckKey(FName(a)); if (!v && b) v = values.CheckKey(FName(b)); if (v) out = *v; return v != nullptr; };
+		DoomVRModKeys k = DoomVR_DIKeys;
+		if (!get("KEY_USE", nullptr, k.use) || !get("KEY_FORWARD", nullptr, k.up)) continue;
+		get("KEY_BACKWARD", "KEY_BACK", k.down);
+		get("KEY_DIRLEFT", "KEY_LEFT", k.left);
+		get("KEY_DIRRIGHT", "KEY_RIGHT", k.right);
+		DoomVR_DIKeys = k;
+		Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: the mod's own keys read from its scripts - use %d, up %d, down %d, left %d, right %d\n", k.use, k.up, k.down, k.left, k.right);
+		return;
+	}
+}
+
+bool DoomVR_PatchModScript(const char* fullName, const char* text, size_t len, FString& out)
+{
+	if (fullName == nullptr || text == nullptr) return false;
+	{
+		const std::string_view all(text, len);
+		if (all.find("KEY_FORWARD") != all.npos && all.find("enum") != all.npos) DoomVR_ReadModKeyEnum(text, len);
+	}
+	if (stricmp(fullName, "zscript/system/zmixins.zsc") != 0) return false;
+	std::string src(text, len);
+	static const struct { int key; const char* name; } kNames[] = {
+		{ KEY_VR_A, "A" }, { KEY_VR_B, "B" }, { KEY_VR_X, "X" }, { KEY_VR_Y, "Y" }, { KEY_VR_MENU, "MENU" },
+		{ KEY_VR_LGRIP, "LEFT GRIP" }, { KEY_VR_RGRIP, "RIGHT GRIP" }, { KEY_VR_LSTICK, "LEFT STICK CLICK" }, { KEY_VR_RSTICK, "RIGHT STICK CLICK" },
+		{ KEY_VR_LTRIGGER, "LEFT TRIGGER" }, { KEY_VR_RTRIGGER, "RIGHT TRIGGER" },
+		{ KEY_VR_LSTICK_RIGHT, "LEFT STICK RIGHT" }, { KEY_VR_LSTICK_LEFT, "LEFT STICK LEFT" }, { KEY_VR_LSTICK_DOWN, "LEFT STICK DOWN" }, { KEY_VR_LSTICK_UP, "LEFT STICK UP" },
+		{ KEY_VR_RSTICK_UP, "RIGHT STICK UP" }, { KEY_VR_RSTICK_DOWN, "RIGHT STICK DOWN" },
+		{ KEY_VRF_A, "A" }, { KEY_VRF_B, "B" }, { KEY_VRF_X, "X" }, { KEY_VRF_Y, "Y" }, { KEY_VRF_LB, "LB" }, { KEY_VRF_RB, "RB" },
+		{ KEY_VRF_DPADUP, "D-PAD UP" }, { KEY_VRF_DPADDOWN, "D-PAD DOWN" }, { KEY_VRF_DPADLEFT, "D-PAD LEFT" }, { KEY_VRF_DPADRIGHT, "D-PAD RIGHT" },
+		{ KEY_VRF_VIEW, "VIEW" }, { KEY_VRF_MENU, "MENU" }, { KEY_VRF_LSTICK, "LEFT STICK CLICK" }, { KEY_VRF_RSTICK, "RIGHT STICK CLICK" },
+		{ KEY_VRF_LGRIP, "LEFT GRIP" }, { KEY_VRF_RGRIP, "RIGHT GRIP" },
+	};
+	std::string add = "\n\t\t\t\t\t// Doom VR (added in memory as this was read): the controller's buttons by name\n";
+	for (auto& k : kNames) add += "\t\t\t\t\tcase " + std::to_string(k.key) + ": return \"" + k.name + "\";\n";
+	// Every copy: the mod has one in its System mixin and one in KeyMan.
+	int copies = 0;
+	for (size_t fn = src.find("static string KeyCodeToBind("); fn != std::string::npos; fn = src.find("static string KeyCodeToBind(", fn + 1))
+	{
+		const size_t sw = src.find("switch (value)", fn);
+		if (sw == std::string::npos || sw - fn > 8000) continue;
+		const size_t open = src.find('{', sw);
+		if (open == std::string::npos) continue;
+		src.insert(open + 1, add);
+		++copies;
+	}
+	if (copies == 0) return false;
+	out = src.c_str();
+	Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: %s - the mod's key names now include the controller's buttons (%d tables, in memory)\n", fullName, copies);
+	return true;
+}
+
+void DoomVR_ControllerKeyFirst(const char* cmd, int& k1, int& k2)
+{
+	if (!DoomVR_Active() || menuactive != MENU_Off || cmd == nullptr || cmd[0] == 0) return;
+	const int lo = gPadLayout ? KEY_VRF_A : KEY_VR_A, hi = gPadLayout ? KEY_VRF_RGRIP : KEY_VR_RSTICK_DOWN;
+	for (int k = lo; k <= hi; ++k)
+	{
+		const char* over = DoomVR_ModBind(k);
+		if (stricmp(over ? over : Bindings.GetBinding(k).GetChars(), cmd) != 0) continue;
+		if (k1 == k) return;
+		k2 = k1;
+		k1 = k;
+		return;
+	}
+}
+
 void DoomVR_LevelStarted()
 {
 	if (!gUp) return;
 	gRecenterAsked = true;
 	gRecenterWhy = "a level started";
+	DoomVR_ModInputCompat();
 }
 
 // Test hook: what a runtime's own recenter looks like to DoomVR - the layer
@@ -4057,6 +4342,8 @@ void DoomVR_LoadKeepAlive()
 
 #else // built without pcvr-xr: the flat game, and nothing else
 
+CVAR(Float, vr_weapon_tilt, -30.f, 0)	// read by p_user.cpp's shots from the hand
+
 bool DoomVR_SpectatorCrop(int, int, float*) { return false; }
 void DoomVR_ForgetGame() {}
 void DoomVR_ForgetGameAtRestart() {}
@@ -4076,6 +4363,7 @@ void DoomVR_BeginFrame()
 	}
 }
 bool DoomVR_ShouldRender() { return false; }
+int DoomVR_LobbyStars(int, int, int, DoomVR_StarRect*, int) { return -1; }
 void DoomVR_EyeSize(int& width, int& height) { width = height = 0; }
 void DoomVR_EyeProjection(int, float, float, float out[16]) { memset(out, 0, 16 * sizeof(float)); }
 DoomVR_EyeView DoomVR_GetEyeView(int, double, double) { return DoomVR_EyeView(); }

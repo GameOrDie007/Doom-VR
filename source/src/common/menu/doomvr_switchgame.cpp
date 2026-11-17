@@ -225,6 +225,8 @@ static std::string MyWadScan(const std::string& path, std::vector<std::string>& 
 			if (isOne(base, kWeapons, countof(kWeapons))) tag("ownweapons");
 		}
 		if (!strnicmp(full, "DECORATE", 8) || !strnicmp(full, "ZSCRIPT", 7) || !strnicmp(full, "DEHACKED", 8)) tag("ownactors");
+		// A mod Doom VR has its own guns for (FitPack): known by its own script files.
+		if (!stricmp(full, "zscript/system/zeventhandlers.zsc") || !stricmp(full, "zscript/player/zweaponsbase.zsc")) tag("fit:doominfinite");
 		if (!strnicmp(full, "TEXTURE1", 8) || !strnicmp(full, "TEXTURE2", 8) || !strnicmp(full, "TEXTURES", 8) || !stricmp(full, "P_START") || !stricmp(full, "PP_START") || !stricmp(full, "TX_START")
 		    || !strnicmp(full, "patches/", 8) || !strnicmp(full, "flats/", 6) || !strnicmp(full, "textures/", 9)) tag("owntextures");
 		if ((slash == nullptr && (!strnicmp(full, "D_", 2) || !stricmp(full, "MUSINFO"))) || !strnicmp(full, "music/", 6)) tag("ownmusic");
@@ -558,6 +560,8 @@ static void DoomVR_BuildModKeysMenu()
 EXTERN_CVAR(Bool, m_simpleoptions)
 CVAR(Bool, vr_simple_options_set, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
+void DoomVR_BuildMultiplayerMenus();	// doomvr_multiplayer.cpp
+
 void DoomVR_BuildSwitchGameMenu()
 {
 	if (!vr_simple_options_set)
@@ -567,6 +571,9 @@ void DoomVR_BuildSwitchGameMenu()
 	}
 	AddToMainMenu("MainMenu");
 	AddToMainMenu("MainMenuTextOnly");
+	AddToMainMenu("MainMenu", "DoomVRMultiplayer", "Multiplayer", 'm');
+	AddToMainMenu("MainMenuTextOnly", "DoomVRMultiplayer", "Multiplayer", 'm');
+	DoomVR_BuildMultiplayerMenus();
 	DoomVR_BuildModKeysMenu();
 	DoomVR_BuildBuildMenu();
 
@@ -859,6 +866,26 @@ static bool LauncherArgs(const FString& bat, TArray<FString>& out)
 	return out.Size() > 0;
 }
 
+/*
+	Game Or Die's own 3D guns for a mod whose guns are its own: a pack made by
+	tools/replacer-guns.py from the mod's class and sprite names only, holding
+	our Doom guns (doomvr-weapons-doom-b.pk3, kept for it) on its weapons.
+	Loaded after the mod. Empty when there is none, or it is not installed.
+*/
+static FString FitPack(const DoomVRMyWad& my)
+{
+	static const struct { const char* tag; const char* pack; } kFits[] = {
+		{ "fit:doominfinite", "doomvr-weapons-doominfinite-b.pk3" },
+	};
+	for (auto& f : kFits)
+	{
+		if (std::find(my.tags.begin(), my.tags.end(), f.tag) == my.tags.end()) continue;
+		FString path = progdir + "mods/" + f.pack;
+		if (FileExists(path)) return path;
+	}
+	return "";
+}
+
 CCMD(vr_switchgame)
 {
 	if (argv.argc() < 2) { Printf("vr_switchgame <launcher name>\n"); return; }
@@ -893,8 +920,10 @@ CCMD(vr_switchgame)
 		FString dropped;
 		for (unsigned i = 0; i < launch.Size(); ++i)
 		{
-			// A My WADs file keeps only the Modern add-ons that fit what it brings.
-			if (my != nullptr && launch[i].CompareNoCase("-modern") == 0 && i + 1 < launch.Size() && !DoomVR_ModernFits(launch[i + 1].GetChars(), my->tags))
+			// A My WADs file keeps only the Modern add-ons that fit what it brings
+			// (and our Doom guns' models, when we have its guns: FitPack).
+			if (my != nullptr && launch[i].CompareNoCase("-modern") == 0 && i + 1 < launch.Size() && !DoomVR_ModernFits(launch[i + 1].GetChars(), my->tags)
+			    && !(!FitPack(*my).IsEmpty() && ExtractFileBase(launch[i + 1].GetChars(), true).CompareNoCase("doomvr-weapons-doom-b.pk3") == 0))
 			{
 				dropped.AppendFormat(" %s", ExtractFileBase(launch[i + 1].GetChars(), true).GetChars());
 				++i;
@@ -914,6 +943,24 @@ CCMD(vr_switchgame)
 				args.Push("-file");
 				args.Push(file.c_str());
 				shown.AppendFormat(" -file %s", file.c_str());
+			}
+			if (FString fit = FitPack(*my); !fit.IsEmpty())
+			{
+				// Its models are our Doom guns' (doomvr-weapons-doom-b.pk3): loaded
+				// here too when this game's launcher does not load them.
+				bool haveModels = false;
+				for (auto& a : args) if (ExtractFileBase(a.GetChars(), true).CompareNoCase("doomvr-weapons-doom-b.pk3") == 0) haveModels = true;
+				FString models = progdir + "mods/doomvr-weapons-doom-b.pk3";
+				if (!haveModels && FileExists(models))
+				{
+					args.Push("-file");
+					args.Push(models);
+					shown.AppendFormat(" -file %s", models.GetChars());
+				}
+				args.Push("-file");
+				args.Push(fit);
+				shown.AppendFormat(" -file %s", fit.GetChars());
+				Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: My WADs: %s gets Game Or Die's 3D guns (%s)\n", my->label.c_str(), ExtractFileBase(fit.GetChars(), true).GetChars());
 			}
 			for (const char* a : { "+vr_current_game", my->label.c_str(), "+vr_book_game", my->launcher.c_str() })
 			{

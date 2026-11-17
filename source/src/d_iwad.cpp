@@ -913,7 +913,10 @@ int FIWadManager::IdentifyVersion (std::vector<FileSys::ResourceName>&wadfiles, 
 	{
 		// For net games all wads must be explicitly named to make it easier for the host to know
 		// exactly what's being loaded.
-		if (i_loadsupportwad && !Args->CheckParm(FArg_join) && !Args->CheckParm(FArg_host))
+		// DoomVR: loaded in network games too. Every player runs Doom VR, which
+		// loads it alike, and the host's file check still compares the lists;
+		// without it a co-op game had a different game from playing alone.
+		if (i_loadsupportwad)
 		{
 			FString supportWAD = IWADPathFileSearch(info.SupportWAD);
 

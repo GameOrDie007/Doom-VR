@@ -63,21 +63,49 @@ extend class ScreenJobRunner
 				if (IsPlayerReady(consoleplayer))
 					Screen.DrawTexture(readyico, true, 0, 0, DTA_CleanNoMove, true, DTA_TopLeft, true);
 
-				Screen.DrawText(ConFont, Font.CR_UNTRANSLATED, (int(readysize.X) + 4) * CleanXFac, CleanYFac, String.Format("%d/%d", readyClients, totalClients), DTA_CleanNoMove, true);
+				// DoomVR: who is ready and the countdown, large and in the middle
+				// of the bottom where a headset player looks (the corner was out
+				// of sight in the headset, and the screen seemed stuck).
 				int startTimer = GetReadyTimer();
-				if (startTimer > 0)
+				string readyLine = String.Format("Ready %d of %d", readyClients, totalClients);
+				int col = Font.CR_GOLD;
+				if (startTimer > 0 && readyClients < totalClients)
 				{
-					int col = Font.CR_UNTRANSLATED;
+					readyLine = readyLine .. String.Format(" - next map in %d", int(ceil(double(startTimer) / GameTicRate)));
 					if (startTimer <= GameTicRate * 5)
 						col = Font.CR_RED;
-
-					Screen.DrawText(ConFont, col, 0, int(readysize.Y) * CleanYFac + CleanYFac, SystemTime.Format("%M:%S", int(ceil(double(startTimer) / GameTicRate))), DTA_CleanNoMove, true);
 				}
+				// Twice the clean size, but never wider than the screen: with the
+				// countdown on it the line ran off both sides of the headset's screen.
+				double big = CleanXFac * 2;
+				double lineW = ConFont.StringWidth(readyLine);
+				if (lineW * big > Screen.GetWidth() * 0.92)
+					big = max(1.0, Screen.GetWidth() * 0.92 / lineW);
+				int lx = int((Screen.GetWidth() - lineW * big) / 2);
+				int ly = int(Screen.GetHeight() - ConFont.GetHeight() * (CleanYFac + big) - CleanYFac * 4);
+				Screen.DrawText(ConFont, col, lx, ly, readyLine, DTA_ScaleX, big, DTA_ScaleY, big);
 			}
 		}
 
 		if (net_cutscenereadytype != 2 || consoleplayer == Net_Arbitrator)
 		{
+			if (IsPlayerReady(consoleplayer))
+			{
+				string waitTxt = "You are ready - waiting for the others";
+				int wx = (Screen.GetWidth() - ConFont.StringWidth(waitTxt) * CleanXFac) / 2;
+				int wy = Screen.GetHeight() - ConFont.GetHeight() * CleanYFac - CleanYFac;
+				Screen.DrawText(ConFont, Font.CR_GREEN, wx, wy, waitTxt, DTA_CleanNoMove, true);
+				return;
+			}
+			CVar vrm = CVar.FindCVar("vr_mode");
+			if (vrm && vrm.GetInt() != 0)
+			{
+				string vrTxt = "Press A or the trigger to ready up";
+				int vx = (Screen.GetWidth() - ConFont.StringWidth(vrTxt) * CleanXFac) / 2;
+				int vy = Screen.GetHeight() - ConFont.GetHeight() * CleanYFac - CleanYFac;
+				Screen.DrawText(ConFont, Font.CR_GREEN, vx, vy, vrTxt, DTA_CleanNoMove, true);
+				return;
+			}
 			string contType;
 			switch (GetLastInputType())
 			{

@@ -238,6 +238,71 @@ OptionMenu "DoomVRScreens" protected
 	StaticText "The monitor follows your turns, not every wobble, with the horizon level"
 }
 
+// Multiplayer (doomvr_multiplayer.cpp): on the main menu, beside Switch Game.
+// Two steps at most: Multiplayer, then Host or Join.
+OptionValue "DoomVRNetMode"
+{
+	0, "Co-op"
+}
+
+OptionValue "DoomVRNetPlayers"
+{
+	2, "2"
+	3, "3"
+	4, "4"
+	5, "5"
+	6, "6"
+	7, "7"
+	8, "8"
+}
+
+OptionMenu "DoomVRMultiplayer" protected
+{
+	Title "Multiplayer"
+	Command "Host a Game", "vr_net_hostmenu"
+	Submenu "Join a Game", "DoomVRJoin"
+	StaticText " "
+	Command "Leave the network game (play alone)", "vr_net_leave"
+}
+
+// "Start at" is filled with the game's maps (DoomVRNetMaps) once they are known;
+// "Carry on from" with this game's co-op saves (DoomVRNetSaves) each time it opens.
+OptionValue "DoomVRNetSaves"
+{
+	0, "A new game"
+}
+
+OptionMenu "DoomVRHost" protected
+{
+	Title "Host a Game"
+	Option "Mode", "vr_net_mode", "DoomVRNetMode"
+	Option "Players", "vr_net_players", "DoomVRNetPlayers"
+	Option "Start at", "vr_net_map", "DoomVRNetMaps"
+	Option "Carry on from", "vr_net_load", "DoomVRNetSaves"
+	StaticText " "
+	Command "Host now", "vr_net_host"
+	StaticText " "
+	StaticText "Everyone plays the same game and mods you are playing."
+	StaticText "The lobby shows the address friends join at."
+	StaticText "A saved co-op game needs the friends who were in it."
+}
+
+// The Game Or Die server and the addresses joined before go above these rows.
+OptionMenu "DoomVRJoin" protected
+{
+	Title "Join a Game"
+	StaticText "Type an address", 1
+	DoomVRAddress "Host's address", "vr_net_address"
+	Command "Join that address", "vr_net_join"
+	StaticText " "
+	StaticText "Play the same game and mods as the host."
+}
+
+OptionMenu "DoomVRJoinForget" protected
+{
+	Title "Remove an Address"
+}
+
 // VR Options first, in both the simple and the full Options menu - the thing
 // a headset player opens Options for.
 AddOptionMenu "OptionsMenu" before "os_Menu"

@@ -47,6 +47,8 @@ void DoomVR_PerfAdd(int slot, double ms);	// doomvr_headset.cpp
 extern bool vid_hdr_active;
 
 
+bool DoomVR_NetLobbyUp();	// doomvr_multiplayer.cpp
+
 namespace OpenGLESRenderer
 {
 
@@ -92,6 +94,39 @@ static bool SrgbWriteControl()
 }
 static constexpr GLenum kFramebufferSrgbExt = 0x8DB9;	// GL_FRAMEBUFFER_SRGB_EXT
 
+
+// DoomVR: the co-op lobby's starfield in an eye (doomvr_headset.cpp places
+// the stars): black, then each star a small square cleared to its brightness.
+// Clears only, so it draws the same on every GL there is, with no shader.
+static void DoomVR_DrawLobbyStars(int eye, int w, int h)
+{
+	static DoomVR_StarRect stars[1024];
+	const int n = DoomVR_LobbyStars(eye, w, h, stars, 1024);
+	if (n < 0) return;
+	const GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
+	GLint box[4];
+	glGetIntegerv(GL_SCISSOR_BOX, box);
+	GLboolean mask[4];
+	glGetBooleanv(GL_COLOR_WRITEMASK, mask);
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	glDisable(GL_SCISSOR_TEST);
+	glClearColor(0.f, 0.f, 0.f, 1.f);
+	glClear(GL_COLOR_BUFFER_BIT);
+	glEnable(GL_SCISSOR_TEST);
+	for (int i = 0; i < n; ++i)
+	{
+		const DoomVR_StarRect& r = stars[i];
+		const float b = r.bright;
+		glScissor(r.x, r.y, r.size, r.size);
+		glClearColor(0.92f * b, 0.92f * b, b, 1.f);
+		glClear(GL_COLOR_BUFFER_BIT);
+	}
+	glScissor(box[0], box[1], box[2], box[3]);
+	if (!scissor) glDisable(GL_SCISSOR_TEST);
+	glColorMask(mask[0], mask[1], mask[2], mask[3]);
+	glClearColor(0.f, 0.f, 0.f, 0.f);
+}
+
 void FGLRenderer::PresentHeadsetEye(int eye)
 {
 	if (!DoomVR_ShouldRender()) return;
@@ -109,6 +144,7 @@ void FGLRenderer::PresentHeadsetEye(int eye)
 	DoomVR_BeginEye(eye);	// binds that eye's image as the draw target
 	mBuffers->BindCurrentTexture(0);
 	DrawPresentTexture(eyeBox, true);
+	DoomVR_DrawLobbyStars(eye, w, h);
 	DoomVR_EndEye(eye);
 	if (srgb) glEnable(kFramebufferSrgbExt);
 }
@@ -124,6 +160,9 @@ void FGLRenderer::Flush()
 		// The second eye: the scene buffer holds it now (the first went at
 		// NextEye). Then the 2D - menus, the HUD, the console - on its own
 		// flat panel, drawn once and flat, not into each eye.
+		// The co-op lobby has no level, so no first eye went at NextEye: both
+		// go here, with its starfield.
+		if (DoomVR_NetLobbyUp()) PresentHeadsetEye(0);
 		PresentHeadsetEye(1);
 		int panelW, panelH;
 		if (DoomVR_PhotoMode() || DoomVR_GameManualShowing())

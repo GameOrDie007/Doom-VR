@@ -39,6 +39,14 @@
 #include "s_music.h"
 #include "m_argv.h"
 #include "i_interface.h"
+#include "menu.h"
+
+// DoomVR: the co-op ready on a score screen (d_net.cpp, doomstat.h).
+bool Net_IsPlayerReady(int player);
+extern bool netgame;
+extern int consoleplayer;
+// The screen job the controllers last readied on; let go when it ends.
+static const void* VRReadiedOn = nullptr;
 
 CVAR(Bool, inter_subtitles, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 
@@ -173,6 +181,7 @@ void DeleteScreenJob()
 
 void EndScreenJob()
 {
+	VRReadiedOn = nullptr;
 	DeleteScreenJob();
 	if (cutscene.completion) cutscene.completion(false);
 	cutscene.completion = nullptr;
@@ -201,6 +210,37 @@ bool ScreenJobResponder(event_t* ev)
 			C_DoCommand("screenshot");
 			return true;
 		}
+		// DoomVR: the menu button opens the menu here too. On a co-op score
+		// screen a player waiting for the others could not reach the menu
+		// (to leave the network game or quit) because the bindings are never
+		// looked at while a screen job runs.
+		if (binding.CompareNoCase("menu_main") == 0)
+		{
+			M_StartControlPanel(true);
+			M_SetMenu(NAME_MainMenu, -1);
+			return true;
+		}
+	}
+	// DoomVR: the VR controllers send their own keys; their A, the right
+	// trigger and the Steam Frame's A count as a pad's A here, so a headset
+	// player can ready up on a co-op intermission instead of waiting out its
+	// countdown.
+	// Readying up from the controllers only ever readies: a second press of A
+	// or the trigger (once per screen) would take the ready back, since the
+	// game's ready is a switch, and the player was left waiting with nothing
+	// counting down.
+	event_t vrev;
+	if (ev->type == EV_KeyDown && (ev->data1 == KEY_VR_A || ev->data1 == KEY_VR_RTRIGGER || ev->data1 == KEY_VRF_A))
+	{
+		if (netgame && cutscene.runner)
+		{
+			if (VRReadiedOn == cutscene.runner || Net_IsPlayerReady(consoleplayer))
+				return true;
+			VRReadiedOn = cutscene.runner;
+		}
+		vrev = *ev;
+		vrev.data1 = KEY_PAD_A;
+		ev = &vrev;
 	}
 	FInputEvent evt = ev;
 	if (cutscene.runner)

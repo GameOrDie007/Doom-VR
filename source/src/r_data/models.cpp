@@ -269,6 +269,17 @@ static int DoomVR_ChainFrame(DPSprite *psp, const FSpriteModelFrame *smf)
 
 static void DoomVR_MeasureMuzzle(DPSprite *psp, const FSpriteModelFrame *smf, int smf_flags);	// below
 
+// DoomVR: the style a model in the hand is drawn with. "Translucent" at full
+// alpha is solid (Doom Infinite keeps its player so): a non-Normal style turns on
+// back-face culling made for the flat view, and in the hand that culls the front
+// faces, so the gun is drawn inside out.
+static FRenderStyle DoomVR_HUDModelStyle(AActor* playermo)
+{
+	if (DoomVR_Active() && playermo->RenderStyle == LegacyRenderStyles[STYLE_Translucent] && playermo->Alpha >= 1.)
+		return DefaultRenderStyle();
+	return playermo->RenderStyle;
+}
+
 void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translation, FVector3 rotation, FVector3 rotation_pivot, FSpriteModelFrame *smf, double ticFrac)
 {
 	AActor * playermo = players[consoleplayer].camera;
@@ -352,7 +363,7 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 
 	float orientation = smf->xscale * smf->yscale * smf->zscale;
 
-	renderer->BeginDrawHUDModel(playermo->RenderStyle, objectToWorldMatrix, (orientation < 0) != vrMirror, smf_flags);
+	renderer->BeginDrawHUDModel(DoomVR_HUDModelStyle(playermo), objectToWorldMatrix, (orientation < 0) != vrMirror, smf_flags);
 	auto trans = psp->GetTranslation();
 	if ((psp->Flags & PSPF_PLAYERTRANSLATED)) trans = psp->Owner->mo->Translation;
 
@@ -366,7 +377,7 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 		drawn = &running;
 	}
 	RenderFrameModels(renderer, playermo->Level, drawn, psp->GetState(), psp->GetTics(), ticFrac, trans, psp->Caller);
-	renderer->EndDrawHUDModel(playermo->RenderStyle, smf_flags);
+	renderer->EndDrawHUDModel(DoomVR_HUDModelStyle(playermo), smf_flags);
 }
 
 // DoomVR: a model's own scale, offsets and turns, as RenderHUDModel applies
@@ -407,6 +418,7 @@ static void DoomVR_ModelChain(const FSpriteModelFrame *smf, int smf_flags, VSMat
 	fit changes; a model whose format gives no points keeps the fixed spot.
 */
 void DoomVR_NoteMuzzle(const void* weapon, double right, double up, double ahead, const char* name);
+void DoomVR_NoteBarrel(const void* weapon, double pitch, const char* name);
 bool DoomVR_HandModelToAim(const float p[3], float out[3]);
 static void DoomVR_MeasureMuzzle(DPSprite *psp, const FSpriteModelFrame *smf, int smf_flags)
 {
@@ -429,6 +441,13 @@ static void DoomVR_MeasureMuzzle(DPSprite *psp, const FSpriteModelFrame *smf, in
 	lastSmf = smf;
 	lastWeapon = psp->Caller;
 	memcpy(lastProbe, probe, sizeof(probe));
+	// The barrel's line: the model's own ahead (its +X, as the game draws a
+	// model facing its actor), turned up from the aim (x right, y up, z back).
+	{
+		const double dy = probe[4] - probe[1], dz = probe[5] - probe[2];
+		if (dy * dy + dz * dz > 1e-8)
+			DoomVR_NoteBarrel(psp->Caller, atan2(dy, -dz) * (180.0 / M_PI), psp->Caller->GetClass()->TypeName.GetChars());
+	}
 
 	float front = -1e9f;
 	TArray<FVector3> aim;
@@ -522,9 +541,9 @@ void DoomVR_RenderWheelModel(FModelRenderer *renderer, AActor *weapon, FSpriteMo
 	}
 	objectToWorldMatrix.multMatrix(chain);
 	const float orientation = smf->xscale * smf->yscale * smf->zscale;
-	renderer->BeginDrawHUDModel(playermo->RenderStyle, objectToWorldMatrix, (orientation < 0) != vrMirror, smf_flags);
+	renderer->BeginDrawHUDModel(DoomVR_HUDModelStyle(playermo), objectToWorldMatrix, (orientation < 0) != vrMirror, smf_flags);
 	RenderFrameModels(renderer, playermo->Level, smf, state, state->GetTics(), 0., NO_TRANSLATION, weapon);
-	renderer->EndDrawHUDModel(playermo->RenderStyle, smf_flags);
+	renderer->EndDrawHUDModel(DoomVR_HUDModelStyle(playermo), smf_flags);
 }
 
 /*

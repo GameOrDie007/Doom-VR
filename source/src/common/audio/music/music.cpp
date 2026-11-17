@@ -341,8 +341,44 @@ void S_ResumeMusic ()
 //
 //==========================================================================
 
+// DoomVR: in a network game the music went silent (no
+// music all through a co-op game, nothing in the log). Every 3 seconds, a
+// network game's song that should be playing is checked: a paused song with
+// the game not paused is resumed, a song that was stopped is started again,
+// and the log says which it was (a few times at most).
+extern bool netgame;
+#include "i_time.h"
+#include "i_interface.h"
+static void DoomVR_KeepNetMusic()
+{
+	static uint64_t nextCheck = 0;
+	static int told = 0;
+	const uint64_t now = I_msTime();
+	if (!netgame || now < nextCheck) return;
+	nextCheck = now + 3000;
+	if (paused || nomusic || !mus_enabled || snd_musicvolume <= 0) return;
+	if (MusicPaused && mus_playing.handle != nullptr)
+	{
+		if (told < 6) { ++told; Printf("DoomVR: co-op music %s was paused with the game running; resumed\n", mus_playing.name.GetChars()); }
+		S_ResumeMusic();
+	}
+	else if (mus_playing.handle == nullptr && (mus_playing.name.IsNotEmpty() || mus_playing.LastSong.IsNotEmpty()))
+	{
+		const FString song = mus_playing.name.IsNotEmpty() ? mus_playing.name : mus_playing.LastSong;
+		const bool ok = S_ChangeMusic(song.GetChars(), mus_playing.baseorder, true, true);
+		if (told < 6) { ++told; Printf("DoomVR: co-op music %s was not playing; started again (%s)\n", song.GetChars(), ok ? "playing" : "failed"); }
+	}
+	else if (mus_playing.handle != nullptr && !ZMusic_IsPlaying(mus_playing.handle))
+	{
+		if (told < 6) { ++told; Printf("DoomVR: co-op music %s had stopped; started again\n", mus_playing.name.GetChars()); }
+		ZMusic_Start(mus_playing.handle, mus_playing.baseorder, true);
+		S_CreateStream();
+	}
+}
+
 void S_UpdateMusic ()
 {
+	DoomVR_KeepNetMusic();
 	if (mus_playing.handle != nullptr)
 	{
 		ZMusic_Update(mus_playing.handle);

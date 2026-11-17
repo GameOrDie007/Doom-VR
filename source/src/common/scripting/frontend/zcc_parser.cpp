@@ -292,6 +292,8 @@ FARG_ADVANCED(tracefile, "Debug", "",
 
 //**---------------------------------------------------------------------------
 
+bool DoomVR_PatchModScript(const char* fullName, const char* text, size_t len, FString& out);	// doomvr_headset.cpp
+
 static void ParseSingleFile(FScanner *pSC, const char *filename, int lump, void *parser, ZCCParseState &state)
 {
 	int tokentype;
@@ -304,17 +306,19 @@ static void ParseSingleFile(FScanner *pSC, const char *filename, int lump, void 
 		if (filename != nullptr)
 		{
 			lump = fileSystem.CheckNumForFullName(filename, true);
-			if (lump >= 0)
-			{
-				lsc.OpenLumpNum(lump);
-			}
-			else
+			if (lump < 0)
 			{
 				Printf("Could not find script lump '%s'\n", filename);
 				return;
 			}
 		}
-		else lsc.OpenLumpNum(lump);
+		// DoomVR: a mod script that names keys gets the controller's buttons too.
+		FString patched;
+		auto data = fileSystem.ReadFile(lump);
+		if (DoomVR_PatchModScript(fileSystem.GetFileFullName(lump), data.string(), data.size(), patched))
+			lsc.OpenString(fileSystem.GetFileFullName(lump), patched);
+		else
+			lsc.OpenLumpNum(lump);
 
 		pSC = &lsc;
 	}

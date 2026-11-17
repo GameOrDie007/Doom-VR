@@ -533,6 +533,14 @@ bool HUDSprite::GetWeaponRenderStyle(DPSprite *psp, AActor *playermo, sector_t *
 	}
 	if (!RenderStyle.IsVisible(alpha)) return false;	// if it isn't visible skip the rest.
 
+	// DoomVR: a model in the hand that is "translucent" at full alpha is solid.
+	// Doom Infinite keeps its player Translucent at alpha 1 (for its own fades);
+	// a non-Normal model turns on back-face culling made for the flat view, and
+	// in the hand that culls the front faces: the gun is drawn inside out.
+	// (The model's culling follows the player's style: DoomVR_HUDModelStyle, models.cpp.)
+	if (mframe != nullptr && DoomVR_Active() && RenderStyle == LegacyRenderStyles[STYLE_Translucent] && alpha >= 1.f)
+		RenderStyle = LegacyRenderStyles[STYLE_Normal];
+
 	PalEntry ThingColor = (playermo->RenderStyle.Flags & STYLEF_ColorIsFixed) ? playermo->fillcolor : 0xffffff;
 	ThingColor.a = 255;
 

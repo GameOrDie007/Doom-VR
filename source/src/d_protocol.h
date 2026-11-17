@@ -54,6 +54,38 @@ struct zdemoheader_s {
 	uint8_t	consoleplayer;
 };
 
+// DoomVR in a network game: every machine runs every player, so a headset
+// player's hands, aim and look travel in their own command (G_BuildTiccmd
+// fills them from the headset; the playsim reads them, p_user.cpp), never
+// from the local headset. Hand places are eighths of a map unit from the
+// body along its own yaw (right, up from the eyes, forward); angles are
+// hundredths of a degree, as the single-player code takes them.
+enum
+{
+	VRC_FLAGS,
+	VRC_AIM_YAW, VRC_AIM_PITCH,
+	VRC_LOOK_YAW, VRC_LOOK_PITCH,
+	VRC_HAND0,					// right, up, forward, yaw, pitch, roll
+	VRC_HAND1 = VRC_HAND0 + 6,
+	VRC_MUZZLE = VRC_HAND1 + 6,	// the held gun's measured muzzle: right, up, forward
+	VRC_SWING = VRC_MUZZLE + 3,	// a swung blow's damage factor, hundredths (0: none)
+	VRC_COUNT
+};
+enum
+{
+	VRF_HEADSET		= 1,
+	VRF_HAND0		= 2,
+	VRF_HAND1		= 4,
+	VRF_AIM			= 8,
+	VRF_LOOK		= 16,
+	VRF_MUZZLE		= 32,
+	VRF_NOBOB		= 64,		// the eyes do not bob (vr_view_bob off)
+	VRF_CROUCH		= 128,		// crouching for real: the head is already down
+	VRF_GUNSHOTS	= 256,		// vr_shots_from_gun
+	VRF_PHYSUSE		= 512,		// vr_phys_use: a hand presses switches
+	VRF_INSTANT		= 1024,		// vr_instant_switch
+};
+
 struct usercmd_t
 {
 	uint32_t	buttons;
@@ -63,6 +95,7 @@ struct usercmd_t
 	short	forwardmove;
 	short	sidemove;
 	short	upmove;
+	int16_t	vr[VRC_COUNT];	// DoomVR, network games only (above)
 };
 
 // When transmitted, the above message is preceded by a byte
@@ -76,6 +109,7 @@ enum
 	UCMDF_SIDEMOVE		= 0x10,
 	UCMDF_UPMOVE		= 0x20,
 	UCMDF_ROLL			= 0x40,
+	UCMDF_VR			= 0x80,	// DoomVR: a changed-field mask (32 bits), then those fields
 };
 
 // When changing the following enum, be sure to update Net_SkipCommand()

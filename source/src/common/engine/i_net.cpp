@@ -40,6 +40,7 @@
 #	include <sys/ioctl.h>
 #	include <sys/socket.h>
 #	include <unistd.h>
+#	include <ifaddrs.h>	// DoomVR: the lobby's own addresses (I_LocalAddresses)
 #	ifdef __sun
 #		include <fcntl.h>
 #	endif
@@ -198,6 +199,7 @@ const char* Net_GetClientName(int client, unsigned int charLimit);
 void Net_SetUserInfo(int client, TArrayView<uint8_t>& stream);
 void Net_ReadUserInfo(int client, TArrayView<uint8_t>& stream);
 void Net_ReadGameInfo(TArrayView<uint8_t>& stream);
+extern FString NetGameInfoProblem;
 void Net_SetGameInfo(TArrayView<uint8_t>& stream);
 
 static SOCKET CreateUDPSocket()
@@ -336,6 +338,10 @@ void CloseNetwork()
 		MySocket = INVALID_SOCKET;
 		netgame = false;
 	}
+	// DoomVR: so a game can host or join again in the same process (the
+	// Multiplayer menu restarts in place): nobody connected, nothing started.
+	for (auto& c : Connected) c.Clear();
+	bGameStarted = false;
 
 	CloseNetworkLean();
 }
@@ -368,9 +374,101 @@ static void I_NetLog(const char* text, ...)
 #endif
 }
 
+/*
+	DoomVR: the lobby inside the game. A game hosted or joined from the
+	Multiplayer menu restarts in this process with the game's window - and the
+	headset - still up, so the lobby is drawn as game frames (d_main.cpp
+	draws it from I_GetGameLobbyView) instead of in a desktop window the
+	player in a headset cannot see. A failure there goes back to the game
+	alone with the reason, instead of closing the game.
+*/
+static bool (*GameLobbyFrame)() = nullptr;	// set while the in-game lobby runs
+static FString GameLobbyStatus;
+static FString GameLobbyError;
+static bool GameLobbyHost = false;
+static bool GameLobbyStartNow = false;
+static int GameLobbyCurrent = 0, GameLobbyLimit = 0;
+struct GameLobbyFailed {};
+
+void I_SetGameLobby(bool (*frame)())
+{
+	GameLobbyFrame = frame;
+	GameLobbyStatus = "";
+	GameLobbyError = "";
+	GameLobbyStartNow = false;
+	GameLobbyCurrent = GameLobbyLimit = 0;
+}
+
+const char* I_GameLobbyError() { return GameLobbyError.GetChars(); }
+
+// This machine's own network addresses (not the loopback), for friends to
+// join at - the local network's; one on the internet is the router's.
+FString I_LocalAddresses()
+{
+	static FString cached;
+	if (cached.IsNotEmpty()) return cached;
+	auto add = [](in_addr a)
+	{
+		const char* s = inet_ntoa(a);
+		if (s == nullptr || strncmp(s, "127.", 4) == 0 || strncmp(s, "169.254.", 8) == 0) return;
+		if (cached.IndexOf(s) >= 0) return;
+		if (cached.IsNotEmpty()) cached += " or ";
+		cached += s;
+	};
+#ifdef _WIN32
+	char name[256] = {};
+	if (gethostname(name, sizeof(name) - 1) != 0) return "";
+	hostent* he = gethostbyname(name);
+	if (he == nullptr || he->h_addrtype != AF_INET) return "";
+	for (int i = 0; he->h_addr_list[i] != nullptr; ++i)
+	{
+		in_addr a;
+		memcpy(&a, he->h_addr_list[i], sizeof(a));
+		add(a);
+	}
+#else
+	// The headsets (Android) and Linux: the host's name often resolves to the
+	// loopback alone, so read the network interfaces themselves.
+	ifaddrs* list = nullptr;
+	if (getifaddrs(&list) != 0) return "";
+	for (ifaddrs* i = list; i != nullptr; i = i->ifa_next)
+		if (i->ifa_addr != nullptr && i->ifa_addr->sa_family == AF_INET)
+			add(((sockaddr_in*)i->ifa_addr)->sin_addr);
+	freeifaddrs(list);
+#endif
+	return cached;
+}
+void I_GameLobbyStartNow() { GameLobbyStartNow = true; }
+
+// What the lobby screen shows: the latest status, whether this is the host,
+// players in and wanted, and each player's name and whether they are ready.
+bool I_GetGameLobbyView(FString& status, bool& host, int& current, int& limit, TArray<FString>& names, TArray<bool>& ready)
+{
+	if (GameLobbyFrame == nullptr) return false;
+	status = GameLobbyStatus;
+	host = GameLobbyHost;
+	current = GameLobbyCurrent;
+	limit = GameLobbyLimit;
+	names.Clear();
+	ready.Clear();
+	for (int i = 0; i < MaxClients && i < MAXPLAYERS; ++i)
+	{
+		if (Connected[i].Status == CSTAT_NONE) continue;
+		names.Push(Net_GetClientName(i, 0u));
+		ready.Push(Connected[i].Status == CSTAT_READY);
+	}
+	return true;
+}
+
 // Gracefully closes the net window so that any error messaging can be properly displayed.
 static void I_NetError(const char* error)
 {
+	if (GameLobbyFrame != nullptr)
+	{
+		Printf(TEXTCOLOR_RED "NetLobby:: %s\n", error);
+		GameLobbyError = error;
+		throw GameLobbyFailed();
+	}
 	NetStartWindow::NetClose();
 	I_FatalError("%s", error);
 }
@@ -378,6 +476,12 @@ static void I_NetError(const char* error)
 static void I_NetInit(const char* msg, bool host)
 {
 	Printf("NetLobby:: %s\n", msg);
+	if (GameLobbyFrame != nullptr)
+	{
+		GameLobbyStatus = msg;
+		GameLobbyHost = host;
+		return;
+	}
 	NetStartWindow::NetInit(msg, host);
 }
 
@@ -386,6 +490,7 @@ static void I_NetInit(const char* msg, bool host)
 static void I_NetMessage(const char* msg)
 {
 	Printf("NetLobby:: %s\n", msg);
+	if (GameLobbyFrame != nullptr) { GameLobbyStatus = msg; return; }
 	NetStartWindow::NetMessage(msg);
 }
 
@@ -393,6 +498,23 @@ static void I_NetMessage(const char* msg)
 // here to prevent the engine from continuing to start the game until everyone is ready.
 static bool I_NetLoop(bool (*loopCallback)(void*), void* data)
 {
+	if (GameLobbyFrame != nullptr)
+	{
+		// One step of the lobby, then one frame of the game, until the lobby is
+		// done; false when the player backs out or the lobby fails.
+		try
+		{
+			while (!loopCallback(data))
+			{
+				if (!GameLobbyFrame()) return false;
+			}
+		}
+		catch (const GameLobbyFailed&)
+		{
+			return false;
+		}
+		return true;
+	}
 	return NetStartWindow::NetLoop(loopCallback, data);
 }
 
@@ -408,28 +530,35 @@ static void I_NetClientConnected(int client, unsigned int charLimit = 0u)
 	if (client == consoleplayer)
 		flags |= CFL_CONSOLEPLAYER;
 
+	if (GameLobbyFrame != nullptr) return;
 	NetStartWindow::NetConnect(client, name, flags, Connected[client].Status);
 }
 
 // A client changed ready state.
 static void I_NetClientUpdated(int client)
 {
+	if (GameLobbyFrame != nullptr) return;
 	NetStartWindow::NetUpdate(client, Connected[client].Status);
 }
 
 static void I_NetClientDisconnected(int client)
 {
 	Printf("NetLobby:: Client '%s' disconnected.\n", Net_GetClientName(client, 0u));
+	if (GameLobbyFrame != nullptr) return;
 	NetStartWindow::NetDisconnect(client);
 }
 
 static void I_NetUpdatePlayers(int current, int limit)
 {
+	GameLobbyCurrent = current;
+	GameLobbyLimit = limit;
+	if (GameLobbyFrame != nullptr) return;
 	NetStartWindow::NetProgress(current, limit);
 }
 
 static bool I_ShouldStartNetGame()
 {
+	if (GameLobbyFrame != nullptr) return GameLobbyStartNow;
 	return NetStartWindow::ShouldStartNet();
 }
 
@@ -438,6 +567,7 @@ static void I_GetKickClients(TArray<int>& clients)
 	clients.Clear();
 
 	int c = -1;
+	if (GameLobbyFrame != nullptr) return;
 	while ((c = NetStartWindow::GetNetKickClient()) != -1)
 		clients.Push(c);
 }
@@ -447,12 +577,14 @@ static void I_GetBanClients(TArray<int>& clients)
 	clients.Clear();
 
 	int c = -1;
+	if (GameLobbyFrame != nullptr) return;
 	while ((c = NetStartWindow::GetNetBanClient()) != -1)
 		clients.Push(c);
 }
 
 void I_NetDone()
 {
+	if (GameLobbyFrame != nullptr) return;
 	NetStartWindow::NetDone();
 }
 
@@ -1033,6 +1165,7 @@ static bool HostGame(int arg)
 	if (!I_NetLoop(Host_CheckForConnections, (void*)&connectedPlayers))
 	{
 		SendAbort();
+		if (GameLobbyFrame != nullptr) return false;	// DoomVR: back to the game alone
 		throw CExitEvent(0);
 	}
 
@@ -1230,6 +1363,7 @@ static bool Guest_ContactHost(void* unused)
 				memcpy(GameID, &NetBuffer[3], 8);
 				TArrayView<uint8_t> stream = TArrayView(&NetBuffer[11], MAX_MSGLEN - 11);
 				Net_ReadGameInfo(stream);
+				if (NetGameInfoProblem.IsNotEmpty()) I_NetError(NetGameInfoProblem.GetChars());
 				Connected[consoleplayer].bHasGameInfo = true;
 			}
 
@@ -1323,6 +1457,25 @@ static bool JoinGame(int arg)
 	StartNetwork(true);
 
 	// Host is always client 0.
+	if (GameLobbyFrame != nullptr)
+	{
+		// DoomVR: a mistyped address is a message in the lobby, not a closed
+		// game - looked up here first, as BuildAddress would, since its own
+		// failure is a fatal error.
+		FString target = Args->GetArg(arg);
+		const long colon = target.IndexOf(':');
+		if (colon >= 0) target.Truncate(colon);
+		bool named = false;
+		for (size_t i = 0; i < target.Len(); ++i) if ((target[i] < '0' || target[i] > '9') && target[i] != '.') named = true;
+		if (target.IsEmpty() || (named && gethostbyname(target.GetChars()) == nullptr) || (!named && inet_addr(target.GetChars()) == INADDR_NONE))
+		{
+			GameLobbyError.Format("Couldn't find %s", Args->GetArg(arg));
+			Printf(TEXTCOLOR_RED "NetLobby:: %s\n", GameLobbyError.GetChars());
+			return false;
+		}
+		BuildAddress(Connected[0].Address, Args->GetArg(arg));
+	}
+	else
 	BuildAddress(Connected[0].Address, Args->GetArg(arg));
 	Connected[0].Status = CSTAT_CONNECTING;
 
@@ -1333,6 +1486,7 @@ static bool JoinGame(int arg)
 	if (!I_NetLoop(Guest_ContactHost, nullptr))
 	{
 		SendAbort();
+		if (GameLobbyFrame != nullptr) return false;	// DoomVR: back to the game alone
 		throw CExitEvent(0);
 	}
 

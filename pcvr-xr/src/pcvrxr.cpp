@@ -292,6 +292,7 @@ bool Session::Impl::CreateInstance() {
     XrInstanceProperties ip{ XR_TYPE_INSTANCE_PROPERTIES };
     if (XR_SUCCEEDED(xrGetInstanceProperties(instance, &ip))) {
         runtimeName = ip.runtimeName;
+        runtimeVersion = ip.runtimeVersion;
         Log("pcvr-xr: runtime '%s' %d.%d.%d", ip.runtimeName,
             (int)XR_VERSION_MAJOR(ip.runtimeVersion),
             (int)XR_VERSION_MINOR(ip.runtimeVersion),
@@ -774,6 +775,17 @@ bool Session::BringUp(const Config& cfg) {
 #ifdef __ANDROID__
     if (m->haveFrameControllers) m->useSceneTarget = true;   // see the swapchain's size in CreateSwapchains
 #endif
+    // Upside-down eyes on the Steam Frame (Config::flipEyes). Decided once,
+    // and said, so a log always tells which way the picture was sent.
+    m->flipEyes = false;
+#ifdef __ANDROID__
+    if (m->haveFrameControllers) {
+        // As drawn unless the port asks: turning them
+        // over on SteamVR 2.19.3 put the picture upside down.
+        m->flipEyes = cfg.flipEyes == 1;
+        m->Log("pcvr-xr: Steam Frame: eye pictures sent %s", m->flipEyes ? "turned over (the port's choice)" : "as drawn");
+    }
+#endif
 
 #ifdef PCVRXR_D3D11
     if (m->IsD3D()) {
@@ -1239,8 +1251,14 @@ void Session::EndEye(int eye) {
             was given. Comparing the attached texture's dimensions against the
             ones we asked for catches it in one line.
         */
-        m->gl.BlitFramebuffer(0, 0, e.width, e.height, 0, 0, e.width, e.height,
-                              GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        // Turned over where the compositor would show it upside down
+        // (Config::flipEyes): the destination's rows run top to bottom.
+        if (m->flipEyes)
+            m->gl.BlitFramebuffer(0, 0, e.width, e.height, 0, e.height, e.width, 0,
+                                  GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        else
+            m->gl.BlitFramebuffer(0, 0, e.width, e.height, 0, 0, e.width, e.height,
+                                  GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
         const GLenum err = glGetError();
         if (err != 0) {
@@ -1264,6 +1282,13 @@ void Session::EndEye(int eye) {
     // done with it - in practice a black frame, which reads as "the renderer
     // drew nothing" and sends you looking in entirely the wrong place.
     if (m->dumpRequested) m->DumpEye(eye);
+
+    // Send this eye's drawing to the GPU before the image is handed over.
+    // A GL that batches commands (Zink on the Steam Frame, under Lepton) can
+    // otherwise still be holding the last eye's work when the frame is
+    // submitted, and the compositor shows that eye a frame late: one eye
+    // steady, the other lagging and jumping. A flush is nearly free.
+    glFlush();
 
     XrSwapchainImageReleaseInfo ri{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
     xrReleaseSwapchainImage(e.swapchain, &ri);

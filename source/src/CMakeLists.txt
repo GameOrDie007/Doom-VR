@@ -1127,6 +1127,7 @@ set (PCH_SOURCES
 	common/menu/doomvr_switchgame.cpp
 	common/menu/doomvr_build.cpp
 	doomvr_tune.cpp
+	doomvr_multiplayer.cpp
 	common/menu/savegamemanager.cpp
 	common/statusbar/base_sbar.cpp
 

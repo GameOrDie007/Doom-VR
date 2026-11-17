@@ -531,6 +531,56 @@ LONG WINAPI CatchAllExceptions (LPEXCEPTION_POINTERS info)
 	if (caughtsomething) return EXCEPTION_EXECUTE_HANDLER;
 	caughtsomething = true;
 
+	// DoomVR: say where it crashed, in a file beside the logs, before anything
+	// else (the crash box below waits on a click nobody in a headset can see).
+	// Each line is a module and an offset in it, the crash first, then the
+	// calls that led there; the build's .pdb turns them into lines of code.
+	if (FILE* cf = fopen("log-doomvr-crash.txt", "w"))
+	{
+		auto where = [cf](DWORD64 addr)
+		{
+			HMODULE mod = nullptr;
+			char name[MAX_PATH] = "?";
+			if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)addr, &mod) && mod)
+			{
+				GetModuleFileNameA(mod, name, MAX_PATH);
+				const char* base = strrchr(name, '\\');
+				fprintf(cf, "  %s+0x%llX\n", base ? base + 1 : name, (unsigned long long)(addr - (DWORD64)mod));
+			}
+			else fprintf(cf, "  0x%llX\n", (unsigned long long)addr);
+		};
+		SYSTEMTIME st;
+		GetLocalTime(&st);
+		fprintf(cf, "DoomVR crashed %04d-%02d-%02d %02d:%02d:%02d, code %08lX, %s thread\n", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
+			info->ExceptionRecord->ExceptionCode, GetCurrentThreadId() == MainThreadID ? "main" : "another");
+		if (info->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && info->ExceptionRecord->NumberParameters >= 2)
+			fprintf(cf, "  %s address 0x%llX\n", info->ExceptionRecord->ExceptionInformation[0] ? "writing" : "reading",
+				(unsigned long long)info->ExceptionRecord->ExceptionInformation[1]);
+#ifdef _M_X64
+		CONTEXT ctx = *info->ContextRecord;
+		for (int i = 0; i < 32 && ctx.Rip != 0; ++i)
+		{
+			where(ctx.Rip);
+			DWORD64 imageBase = 0;
+			PRUNTIME_FUNCTION fn = RtlLookupFunctionEntry(ctx.Rip, &imageBase, nullptr);
+			if (fn == nullptr)
+			{
+				ctx.Rip = *(DWORD64*)ctx.Rsp;
+				ctx.Rsp += 8;
+			}
+			else
+			{
+				PVOID handlerData;
+				DWORD64 establisher;
+				RtlVirtualUnwind(UNW_FLAG_NHANDLER, imageBase, ctx.Rip, fn, &ctx, &handlerData, &establisher, nullptr);
+			}
+		}
+#else
+		where((DWORD64)info->ExceptionRecord->ExceptionAddress);
+#endif
+		fclose(cf);
+	}
+
 	char *custominfo = (char *)HeapAlloc (GetProcessHeap(), 0, 16384);
 
 	CrashPointers = *info;

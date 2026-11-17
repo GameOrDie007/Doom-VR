@@ -191,7 +191,8 @@ CUSTOM_CVAR(Float, net_cutscenereadypercent, 0.5f, CVAR_SERVERINFO | CVAR_NOSAVE
 	else if (self > 1.0f)
 		self = 1.0f;
 }
-CVAR(Float, net_cutscenecountdown, 30.0f, CVAR_SERVERINFO | CVAR_NOSAVE)
+// DoomVR: 10 s, not 30: once half the players are ready, the rest are not kept waiting long.
+CVAR(Float, net_cutscenecountdown, 10.0f, CVAR_SERVERINFO | CVAR_NOSAVE)
 
 CVAR(Bool, cl_noboldchat, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, cl_nochatsound, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -1121,6 +1122,8 @@ static void CheckConsistencies()
 				if (clientState.LocalConsistency[tic] != clientState.NetConsistency[tic])
 				{
 					players[client].inconsistant = true;
+					// DoomVR: say so in the log, so a co-op test can tell.
+					Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: player %d is out of sync (consistency check %d)\n", client + 1, clientState.LastVerifiedConsistency);
 					clientState.LastVerifiedConsistency = clientState.CurrentNetConsistency;
 					break;
 				}
@@ -1919,8 +1922,11 @@ void Net_SetGameInfo(TArrayView<uint8_t>& stream)
 }
 
 
+FString NetGameInfoProblem;	// DoomVR: why this joiner can't take part in the host's game
+
 void Net_ReadGameInfo(TArrayView<uint8_t>& stream)
 {
+	NetGameInfoProblem = "";
 	startmap = ReadStringConst(stream);
 	rngseed = ReadInt32(stream);
 	C_ReadCVars(stream);
@@ -1935,6 +1941,13 @@ void Net_ReadGameInfo(TArrayView<uint8_t>& stream)
 			Args->AppendArg(FArg_loadgame);
 			Args->AppendRawArg(load);
 		}
+		// DoomVR: a joiner without that save would stop at "Cannot find
+		// savegame" once the game starts; the lobby turns them back instead.
+		const bool was = netgame;
+		netgame = true;
+		const bool have = FileExists(G_BuildSaveName(Args->CheckValue(FArg_loadgame)));
+		netgame = was;
+		if (!have) NetGameInfoProblem.Format("MISSINGSAVE %s", Args->CheckValue(FArg_loadgame));
 	}
 
 	// Reset this immediately so any further RNG calls the engine has to make will be synced.

@@ -38,6 +38,7 @@
 #include "r_utility.h"
 
 #include "p_visualthinker.h"
+#include "doomvr_headset.h"
 
 static int ThinkCount, ClientSideThinkCount;
 static cycle_t ThinkCycles, ClientSideThinkCycles;
@@ -1264,10 +1265,40 @@ DEFINE_ACTION_FUNCTION_NATIVE(DThinker, Tick, NativeTick)
 
 void DThinker::CallTick()
 {
+	/*
+		DoomVR: the player's own actor ticks with the body turned and tilted
+		where the player is looking or pointing (DoomVR_PawnLook), then is put
+		back, keeping anything the tick did to the angles itself. On a monitor
+		a pawn's angle and pitch ARE where the player looks, and mods read them
+		so: Doom Infinite picks up the gun a line from the eyes along them
+		hits, 72 units out. In the headset the body stays level, so that line
+		passed over every gun on the floor and A never picked one up.
+		Movement, the view and the shots all read the body after this, as
+		before. With no headset it is a no-op.
+	*/
+	// In a network game every player's pawn, each by its own command.
+	AActor* vrUser = nullptr;
+	if (!netgame) vrUser = consoleplayer >= 0 && consoleplayer < MAXPLAYERS ? players[consoleplayer].mo : nullptr;
+	else for (int i = 0; i < MAXPLAYERS && vrUser == nullptr; ++i) if (playeringame[i] && players[i].mo == this) vrUser = players[i].mo;
+	DAngle lookYaw, lookPitch;
+	const bool vrLook = vrUser != nullptr && vrUser == this && DoomVR_PawnLook(vrUser, lookYaw, lookPitch);
+	DRotator body;
+	if (vrLook)
+	{
+		body = vrUser->Angles;
+		vrUser->Angles.Yaw = lookYaw;
+		vrUser->Angles.Pitch = lookPitch;
+	}
 	IFVIRTUAL(DThinker, Tick)
 		VMCallVoid<DThinker*>(func, this);
 	else
 		Tick();
+	if (vrLook && !(ObjectFlags & OF_EuthanizeMe))
+	{
+		vrUser->Angles.Yaw = body.Yaw + deltaangle(lookYaw, vrUser->Angles.Yaw);
+		vrUser->Angles.Pitch = body.Pitch + (vrUser->Angles.Pitch - lookPitch);
+	}
+	if (vrUser != nullptr && vrUser == this && !(ObjectFlags & OF_EuthanizeMe)) DoomVR_ModWalkOver(vrUser);
 }
 
 //==========================================================================

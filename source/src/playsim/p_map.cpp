@@ -60,6 +60,7 @@
 #include "r_utility.h"
 #include "shadowinlines.h"
 #include "vm.h"
+double DoomVR_PlayerSwingPower(const player_t* p, double& speed);	// p_user.cpp
 
 // State.
 
@@ -4661,10 +4662,10 @@ AActor *P_LineAttack(AActor *t1, DAngle angle, double distance,
 	// DoomVR: a blow struck by swinging the hand hits as hard as the swing
 	// (physical play; single player, as the hand is local).
 	if (!nointeract && damage > 0 && ((flags & LAF_ISMELEEATTACK) || damageType == NAME_Melee) && !(flags & LAF_ISOFFHAND) &&
-		t1->player == &players[consoleplayer] && !netgame && !demoplayback && !demorecording)
+		t1->player != nullptr && (netgame || t1->player == &players[consoleplayer]) && !demoplayback && !demorecording)
 	{
 		double speed;
-		const double power = DoomVR_SwingPower(speed);
+		const double power = DoomVR_PlayerSwingPower(t1->player, speed);
 		if (power > 1.0)
 		{
 			const int was = damage;

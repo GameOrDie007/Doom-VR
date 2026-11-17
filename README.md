@@ -15,8 +15,8 @@ built on [UZDoom](https://github.com/UZDoom/UZDoom) 5.0.1.
 3. Start your VR runtime (Virtual Desktop, SteamVR or Quest Link) and press **PRESS START**, or use
    the **Doom VR** shortcut on your desktop. The game picker opens on Doom; pick any game.
 
-**Installing by hand:** download `Doom-VR-1.2.3-PCVR.zip` from
-[release 1.2.3](https://github.com/GameOrDie007/Doom-VR/releases/tag/v1.2.3), extract it anywhere and run **Setup.bat** in the extracted folder. Own a game somewhere Setup doesn't look? Drop its folder
+**Installing by hand:** download `Doom-VR-1.3.0-PCVR.zip` from
+[release 1.3.0](https://github.com/GameOrDie007/Doom-VR/releases/tag/v1.3.0), extract it anywhere and run **Setup.bat** in the extracted folder. Own a game somewhere Setup doesn't look? Drop its folder
 onto Setup.bat.
 
 You need Windows 10 or 11 (64-bit), a PC VR headset with an OpenXR runtime, a graphics card that
@@ -43,7 +43,7 @@ fits come from your PC's Doom VR install, so install the PC version first.
    time, put the headset on and choose Allow.
 3. On the headset: Library, Unknown Sources, **Doom VR**.
 
-By hand: download `Doom-VR-1.2.3-Quest.zip` from [Releases](../../releases), unzip it on your PC and
+By hand: download `Doom-VR-1.3.0-Quest.zip` from [Releases](../../releases), unzip it on your PC and
 double-click **Setup.bat**. The headset needs Developer mode, turned on once in the Meta Horizon
 phone app; the download's README walks through it. Run the installer or Setup again after an
 update: it copies only what changed and keeps your saved games and settings.
@@ -91,6 +91,9 @@ The same download runs on a Valve Steam Frame with no PC, in the Frame's own lib
 - **3D guns in your hands.** Every weapon in Doom, Doom II, Final Doom, Doom 64 and Heretic is a 3D
   model held in our own hands, with a trigger finger, recoil and a punch you throw yourself. Shots
   leave each gun's own barrel.
+- **Co-op in VR.** Multiplayer on the main menu: host a game for up to 8 players or join a
+  friend's by address, and carry on from a co-op save. Everyone plays the same game and mods.
+  Over the internet the host opens port 5029 (UDP).
 - **Physical play.** Two holsters on your body (your pistol on the hip, your long gun on the
   shoulder), swing to strike with fists and melee weapons, two hands on long guns, push switches
   and doors by hand, use items at your mouth, and health, armor and ammo on your wrist.
@@ -116,7 +119,7 @@ The same download runs on a Valve Steam Frame with no PC, in the Frame's own lib
   game picker. A mod in its own folder, or a zip as it comes from GitHub, works too. A WAD with Doom 1 maps plays on Doom, anything else on Doom II; for another game,
   put it in a folder named after that game in the picker (`My WADs\Heretic`). The Modern looks
   that would clash with its own monsters or textures are left out for it.
-- **Multiplayer?** Single player for now.
+- **Multiplayer?** Co-op, since 1.3.0: Multiplayer on the main menu, Host a Game or Join a Game.
 - **Are my saves safe?** Yes, and updating keeps them.
 - **What PC do I need?** One that runs PC VR well. On a weaker PC, set Weapon detail to Standard
   and play the Classic style.

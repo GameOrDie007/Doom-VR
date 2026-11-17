@@ -644,6 +644,7 @@ FBaseCVar* G_GetUserCVar(int playernum, const char* cvarname)
 	return cvar;
 }
 
+void DoomVR_FillCmd(usercmd_t* cmd);
 usercmd_t* G_BaseTiccmd()
 {
 	return &emptycmd;
@@ -730,6 +731,13 @@ void G_BuildTiccmd (usercmd_t *cmd)
 	axis_forward = buttonMap.ButtonAnalog(Button_Forward) - buttonMap.ButtonAnalog(Button_Back);
 	axis_side = buttonMap.ButtonAnalog(Button_MoveLeft) - buttonMap.ButtonAnalog(Button_MoveRight);
 	axis_up = buttonMap.ButtonAnalog(Button_MoveUp) - buttonMap.ButtonAnalog(Button_MoveDown);
+
+	// DoomVR: a stick working a menu or the console does not also walk the
+	// player. Alone the menu pauses the game so it never showed; in a network
+	// game the game keeps running, and the left stick moving the menu's
+	// cursor walked the player about the level at the same time.
+	if (menuactive != MENU_Off || ConsoleState == c_down || ConsoleState == c_falling)
+		axis_yaw = axis_pitch = axis_forward = axis_side = axis_up = 0.f;
 
 	if (cl_analog_straferun)
 	{
@@ -875,6 +883,11 @@ void G_BuildTiccmd (usercmd_t *cmd)
 
 	mousex = mousey = 0;
 
+	// DoomVR: and a move key still held from before the menu opened (the
+	// stick's own "+forward" keys) stops too, until the menu is gone.
+	if (menuactive != MENU_Off || ConsoleState == c_down || ConsoleState == c_falling)
+		forward = side = fly = 0;
+
 	// DoomVR: with a headset, stick movement goes where the head faces. (The
 	// right stick's turning is added every frame, in D_Display.)
 	DoomVR_RotateMove(forward, side);
@@ -947,6 +960,8 @@ void G_BuildTiccmd (usercmd_t *cmd)
 
 	cmd->forwardmove <<= 8;
 	cmd->sidemove <<= 8;
+
+	DoomVR_FillCmd(cmd);	// the headset's hands and aim, network games only (p_user.cpp)
 
 	buttons = cmd->buttons;
 }
@@ -2310,6 +2325,8 @@ void G_SaveGame (const char *filename, const char *description, bool quick)
 	else if (netgame && net_limitsaves && !players[consoleplayer].settings_controller)
 	{
 		Printf("Only settings controllers can save the game\n");
+		// DoomVR: said where a headset player can see it.
+		M_StartMessage("Only the host can save a co-op game.\nThe host's save saves it for everyone.", 1);
 	}
 	else
 	{

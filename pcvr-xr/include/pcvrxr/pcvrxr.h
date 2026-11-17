@@ -125,6 +125,13 @@ struct Config {
     // way a standalone headset's picture is kept crisp without a bigger eye
     // buffer. Ignored where the runtime lacks the extension.
     bool compositorQuality = false;
+    // Turn the eye pictures over on their way into the swapchain (Steam Frame,
+    // Android under Lepton). 1 = turned over; 0 or -1 = as drawn, which is
+    // right: on the Frame with SteamVR 2.19.3 the panels show exactly what the
+    // swapchain holds (panel capture beside an eye dump). A
+    // diagnostic, for a runtime that ever does show them upside down. Only
+    // where the eyes are copied in (the Frame).
+    int flipEyes = -1;
     // Extra OpenXR extensions this port wants. They are enumerated first and
     // only the ones the runtime actually has are requested, because ONE
     // unknown name fails xrCreateInstance outright and takes all of VR with

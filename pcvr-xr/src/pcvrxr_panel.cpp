@@ -165,6 +165,9 @@ void Session::EndPanel() {
     // released the image belongs to the runtime.
     if (m->dumpRequested) m->DumpPanel();
 
+    // Flushed before the hand-over, as the eyes are (EndEye).
+    glFlush();
+
     XrSwapchainImageReleaseInfo ri{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
     xrReleaseSwapchainImage(m->panelSwapchain, &ri);
     m->panelDrawn = true;

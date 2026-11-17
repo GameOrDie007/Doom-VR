@@ -99,6 +99,13 @@ void UnpackUserCmd(usercmd_t& cmd, const usercmd_t* basis, TArrayView<uint8_t>& 
 			cmd.upmove = ReadInt16(stream);
 		if (flags & UCMDF_ROLL)
 			cmd.roll = ReadInt16(stream);
+		if (flags & UCMDF_VR)
+		{
+			const uint32_t mask = uint32_t(ReadInt32(stream));
+			for (int i = 0; i < VRC_COUNT; ++i)
+				if (mask & (1u << i))
+					cmd.vr[i] = ReadInt16(stream);
+		}
 	}
 }
 
@@ -176,6 +183,23 @@ void PackUserCmd(const usercmd_t& cmd, const usercmd_t* basis, TArrayView<uint8_
 		flags |= UCMDF_ROLL;
 		WriteInt16(cmd.roll, stream);
 	}
+	// The headset's fields go whole, every tic they are not zero, not only when
+	// they change: a level change wipes the receivers' last command
+	// (Net_ResetCommands) but not the sender's, so a field that never changes -
+	// the flags saying the hands are tracked - was never sent again, and from
+	// the second level on every shot left from the middle of the view.
+	uint32_t vrChanged = 0;
+	for (int i = 0; i < VRC_COUNT; ++i)
+		if (cmd.vr[i] != basis->vr[i] || cmd.vr[i] != 0)
+			vrChanged |= 1u << i;
+	if (vrChanged != 0)
+	{
+		flags |= UCMDF_VR;
+		WriteInt32(int32_t(vrChanged), stream);
+		for (int i = 0; i < VRC_COUNT; ++i)
+			if (vrChanged & (1u << i))
+				WriteInt16(cmd.vr[i], stream);
+	}
 
 	// Write the packing bits
 	WriteInt8(flags, flagsPosition);
@@ -185,9 +209,11 @@ void WriteUserCmdMessage(const usercmd_t& cmd, const usercmd_t* basis, TArrayVie
 {
 	if (basis == nullptr)
 	{
+		static const int16_t noVR[VRC_COUNT] = {};
 		if (cmd.buttons
 			|| cmd.pitch || cmd.yaw || cmd.roll
-			|| cmd.forwardmove || cmd.sidemove || cmd.upmove)
+			|| cmd.forwardmove || cmd.sidemove || cmd.upmove
+			|| memcmp(cmd.vr, noVR, sizeof(noVR)) != 0)
 		{
 			WriteInt8(DEM_USERCMD, stream);
 			PackUserCmd(cmd, basis, stream);
@@ -196,7 +222,8 @@ void WriteUserCmdMessage(const usercmd_t& cmd, const usercmd_t* basis, TArrayVie
 	}
 	else if (cmd.buttons != basis->buttons
 			|| cmd.yaw != basis->yaw || cmd.pitch != basis->pitch || cmd.roll != basis->roll
-			|| cmd.forwardmove != basis->forwardmove || cmd.sidemove != basis->sidemove || cmd.upmove != basis->upmove)
+			|| cmd.forwardmove != basis->forwardmove || cmd.sidemove != basis->sidemove || cmd.upmove != basis->upmove
+			|| cmd.vr[VRC_FLAGS] != 0 || memcmp(cmd.vr, basis->vr, sizeof(cmd.vr)) != 0)
 	{
 		WriteInt8(DEM_USERCMD, stream);
 		PackUserCmd(cmd, basis, stream);
@@ -216,6 +243,7 @@ void SkipUserCmdMessage(TArrayView<uint8_t>& stream)
 		if (type == DEM_USERCMD)
 		{
 			int skip = 1;
+			const bool vr = (stream[0] & UCMDF_VR) != 0;
 			if (stream[0] & UCMDF_PITCH)
 				skip += 2;
 			if (stream[0] & UCMDF_YAW)
@@ -243,6 +271,15 @@ void SkipUserCmdMessage(TArrayView<uint8_t>& stream)
 				}
 			}
 			AdvanceStream(stream, skip);
+			if (vr)
+			{
+				const uint32_t mask = uint32_t(ReadInt32(stream));
+				int fields = 0;
+				for (int i = 0; i < VRC_COUNT; ++i)
+					if (mask & (1u << i))
+						++fields;
+				AdvanceStream(stream, fields * 2);
+			}
 			break;
 		}
 		else if (type == DEM_EMPTYUSERCMD)

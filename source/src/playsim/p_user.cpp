@@ -65,6 +65,7 @@
 #include "serializer_doom.h"
 #include "vm.h"
 #include "doomvr_headset.h"
+#include "types.h"
 #include "p_maputl.h"
 #include "p_spec.h"
 
@@ -1547,9 +1548,96 @@ void P_CheckMusicChange(player_t *player)
 //
 //===========================================================================
 
+/*
+	DoomVR: one player's headset, wherever the playsim needs it. Alone, that is
+	the headset itself, read live, and only for the local player. In a network
+	game every machine runs every player and must come to the same result, so
+	each player's hands, aim, look and settings come from their own command
+	(DoomVR_FillCmd packs the headset's into it, d_protocol.h has the fields) -
+	for the local player too, never the headset directly.
+*/
+EXTERN_CVAR(Float, vr_hunits_per_meter)
+EXTERN_CVAR(Float, vr_height_adjust)
+static player_t* DoomVR_Thinking = nullptr;	// whose PlayerThink is running, for the pawn's natives
+static inline int DoomVR_NetFlags(const player_t* p) { return p != nullptr ? p->cmd.vr[VRC_FLAGS] : 0; }
+static inline double DoomVR_NetAngle(int16_t v) { return v / 100.0; }
+static inline double DoomVR_NetUnits(int16_t v) { return v / 8.0; }
+
+bool DoomVR_PlayerHeadset(const player_t* p)
+{
+	if (p == nullptr) return false;
+	if (netgame) return (DoomVR_NetFlags(p) & VRF_HEADSET) != 0;
+	return p == &players[consoleplayer] && DoomVR_Active();
+}
+
+static bool DoomVR_PlayerSetting(const player_t* p, int flag, bool local)
+{
+	if (netgame) return (DoomVR_NetFlags(p) & flag) != 0;
+	return p == &players[consoleplayer] && local;
+}
+
+bool DoomVR_PlayerAim(const player_t* p, double& yaw, double& pitch)
+{
+	if (p == nullptr) return false;
+	if (netgame)
+	{
+		if (!(DoomVR_NetFlags(p) & VRF_AIM)) return false;
+		yaw = DoomVR_NetAngle(p->cmd.vr[VRC_AIM_YAW]);
+		pitch = DoomVR_NetAngle(p->cmd.vr[VRC_AIM_PITCH]);
+		return true;
+	}
+	return p == &players[consoleplayer] && DoomVR_GetAim(yaw, pitch);
+}
+
+bool DoomVR_PlayerLook(const player_t* p, double& yaw, double& pitch)
+{
+	if (p == nullptr) return false;
+	if (netgame)
+	{
+		if (!(DoomVR_NetFlags(p) & VRF_LOOK)) return false;
+		yaw = DoomVR_NetAngle(p->cmd.vr[VRC_LOOK_YAW]);
+		pitch = DoomVR_NetAngle(p->cmd.vr[VRC_LOOK_PITCH]);
+		return true;
+	}
+	return p == &players[consoleplayer] && DoomVR_GetLook(yaw, pitch);
+}
+
+// A hand's place from the body in map units (right, up from the eyes, forward
+// along the body's yaw) and its turn, degrees, as DoomVR_SetHands lays it out.
+static bool DoomVR_PlayerHand(const player_t* p, int hand, double& right, double& up, double& forward, double& yaw, double& pitch, double& roll)
+{
+	if (p == nullptr) return false;
+	if (netgame)
+	{
+		if (!(DoomVR_NetFlags(p) & (hand ? VRF_HAND1 : VRF_HAND0))) return false;
+		const int16_t* v = &p->cmd.vr[hand ? VRC_HAND1 : VRC_HAND0];
+		right = DoomVR_NetUnits(v[0]); up = DoomVR_NetUnits(v[1]); forward = DoomVR_NetUnits(v[2]);
+		yaw = DoomVR_NetAngle(v[3]); pitch = DoomVR_NetAngle(v[4]); roll = DoomVR_NetAngle(v[5]);
+		return true;
+	}
+	if (p != &players[consoleplayer] || !DoomVR_HandPose(hand, right, up, forward, yaw, pitch, roll)) return false;
+	const double u = vr_hunits_per_meter;
+	right *= u;
+	forward *= u;
+	up = (up + vr_height_adjust) * u;
+	return true;
+}
+
+// The damage factor of a blow the weapon hand's swing just started (1: none).
+double DoomVR_PlayerSwingPower(const player_t* p, double& speed)
+{
+	speed = 0;
+	if (p == nullptr) return 1.0;
+	if (netgame) return p->cmd.vr[VRC_SWING] > 100 ? p->cmd.vr[VRC_SWING] / 100.0 : 1.0;
+	return p == &players[consoleplayer] ? DoomVR_SwingPower(speed) : 1.0;
+}
+
 // Not saved while it is being tested: the VR test launchers turn it on for their own run,
 // so it can never leak into the normal launchers through the ini.
 CVAR(Bool, vr_shots_from_hand, false, 0)
+EXTERN_CVAR(Float, vr_weapon_tilt)
+// The held gun's barrel as drawn, degrees up from the aim (DoomVR_NoteBarrel, below).
+static struct { const void* weapon = nullptr; double pitch = 0; } DoomVR_Barrel;
 
 bool DoomVR_ShotFromHand(AActor* t1, bool offhand, DAngle& angle, DAngle& pitch, DVector3& origin)
 {
@@ -1563,7 +1651,23 @@ bool DoomVR_ShotFromHand(AActor* t1, bool offhand, DAngle& angle, DAngle& pitch,
 	const double pit = t1->FloatVar(offhand ? FName("OffhandPitch") : FName("AttackPitch")) * (M_PI / 180.0);
 	const double rol = t1->FloatVar(offhand ? FName("OffhandRoll") : FName("AttackRoll")) * (M_PI / 180.0);
 	double da = deltaangle(t1->Angles.Yaw, angle).Degrees() * (M_PI / 180.0);
-	const double dp = (pitch - t1->Angles.Pitch).Degrees() * (M_PI / 180.0);
+	double dp = (pitch - t1->Angles.Pitch).Degrees() * (M_PI / 180.0);
+	// The weapon hand's frame above is the VR mods' (aim turned vr_weapon_tilt
+	// down). A gun drawn along another line - Game Or Die's own, along the aim -
+	// fires along its own barrel. The mods' guns (within 10 degrees of the
+	// tilt) are left exactly as they were. Alone only: the drawn model is this
+	// machine's, and a network game must come out the same everywhere.
+	if (!offhand && !netgame && t1->player == &players[consoleplayer] && DoomVR_Barrel.weapon != nullptr &&
+		DoomVR_Barrel.weapon == t1->player->ReadyWeapon && fabs(DoomVR_Barrel.pitch - vr_weapon_tilt) > 10.0)
+	{
+		dp += (DoomVR_Barrel.pitch - vr_weapon_tilt) * (M_PI / 180.0);
+		static int logged = 0;
+		if (logged < 8)
+		{
+			++logged;
+			Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: shot from the hand along the barrel, %.1f deg up from the mods' tilt\n", DoomVR_Barrel.pitch - vr_weapon_tilt);
+		}
+	}
 	if (offhand) da = -da;
 	const DVector3 f(cos(pit) * cos(yaw), cos(pit) * sin(yaw), sin(pit));
 	const DVector3 l0(-sin(yaw), cos(yaw), 0);
@@ -1640,6 +1744,25 @@ void DoomVR_NoteMuzzle(const void* weapon, double right, double up, double ahead
 	}
 }
 
+// The held gun's barrel as drawn (models.cpp, DoomVR_MeasureMuzzle): degrees
+// up from the controller's aim, about the aim's own right axis. The VR weapon
+// mods' guns are drawn about 30 degrees down, the way their shots go
+// (vr_weapon_tilt); Game Or Die's own guns along the aim. Shots from the hand
+// follow the barrel actually drawn (DoomVR_ShotFromHand): with our guns they
+// went 30 degrees under it (GitHub #2, 16 Nov). The store is above DoomVR_ShotFromHand.
+void DoomVR_NoteBarrel(const void* weapon, double pitch, const char* name)
+{
+	if (weapon == DoomVR_Barrel.weapon && fabs(pitch - DoomVR_Barrel.pitch) < 0.1) return;
+	DoomVR_Barrel.weapon = weapon;
+	DoomVR_Barrel.pitch = pitch;
+	static int logged = 0;
+	if (logged < 40)
+	{
+		++logged;
+		Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: %s's barrel %.1f deg up from the controller's aim (from its model)\n", name, pitch);
+	}
+}
+
 // The held gun's muzzle in the map, for a body at bodyXY with its eyes at
 // eyeZ, turned yawDeg - as DoomVR_SetHands places the hand. False with no
 // measured muzzle for the gun up now.
@@ -1654,6 +1777,21 @@ static bool DoomVR_MuzzleAt(const DVector3& bodyXY, double eyeZ, double yawDeg, 
 	at.X += (forward * cos(t) + right * sin(t)) * u;
 	at.Y += (forward * sin(t) - right * cos(t)) * u;
 	at.Z = eyeZ + (up + vr_height_adjust) * u;
+	return true;
+}
+
+// The same for any player: in a network game from their command.
+static bool DoomVR_PlayerMuzzleAt(const player_t* pl, const DVector3& bodyXY, double eyeZ, double yawDeg, DVector3& at)
+{
+	if (!netgame) return pl == &players[consoleplayer] && DoomVR_MuzzleAt(bodyXY, eyeZ, yawDeg, at);
+	if (!(DoomVR_NetFlags(pl) & VRF_MUZZLE)) return false;
+	const int16_t* v = &pl->cmd.vr[VRC_MUZZLE];
+	const double right = DoomVR_NetUnits(v[0]), up = DoomVR_NetUnits(v[1]), forward = DoomVR_NetUnits(v[2]);
+	const double t = yawDeg * (M_PI / 180.0);
+	at = bodyXY;
+	at.X += forward * cos(t) + right * sin(t);
+	at.Y += forward * sin(t) - right * cos(t);
+	at.Z = eyeZ + up;
 	return true;
 }
 
@@ -1692,15 +1830,22 @@ static bool DoomVR_GunStart(AActor* mo, const DVector3& hand, DVector3& origin)
 
 bool DoomVR_ShotFromGun(AActor* t1, bool offhand, bool melee, DVector3& origin)
 {
-	if (!vr_shots_from_gun || vr_shots_from_hand || melee || offhand) return false;
-	if (netgame || demoplayback || demorecording) return false;
-	if (t1 == nullptr || t1->player != &players[consoleplayer] || t1->player->mo != t1) return false;
+	if (vr_shots_from_hand || melee || offhand) return false;
+	if (demoplayback || demorecording) return false;
+	if (t1 == nullptr || t1->player == nullptr || t1->player->mo != t1) return false;
+	if (!DoomVR_PlayerSetting(t1->player, VRF_GUNSHOTS, vr_shots_from_gun)) return false;
 	if (DoomVR_WeaponActionDepth == 0 || DoomVR_OffhandActionDepth > 0) return false;
 	if (!t1->BoolVar(FName("DoomVRAttackTracked"))) return false;
 	// The gun's measured muzzle; else the fixed spot along the hand - AttackAngle
 	// is the hand's yaw less 90 (the VR mods' convention), AttackPitch up.
+	// The body's own yaw, as DoomVR_SetHands placed the hand: while the weapon
+	// runs PlayerThink has turned the pawn to the controller (DoomVRAim), and
+	// the hand laid out along that turn swung the muzzle round the body - a
+	// shot from a gun held out to the side started a metre off it.
+	double bodyYaw = t1->Angles.Yaw.Degrees(), aimYaw, aimPitch;
+	if (DoomVR_PlayerAim(t1->player, aimYaw, aimPitch)) bodyYaw -= aimYaw;
 	DVector3 hand;
-	if (!DoomVR_MuzzleAt(t1->Pos(), t1->player->viewz, t1->Angles.Yaw.Degrees(), hand))
+	if (!DoomVR_PlayerMuzzleAt(t1->player, t1->Pos(), t1->player->viewz, bodyYaw, hand))
 		hand = DoomVR_OnBarrel(*(DVector3*)t1->ScriptVar(FName("AttackPos"), nullptr),
 			t1->FloatVar(FName("AttackAngle")) + 90.0, t1->FloatVar(FName("AttackPitch")));
 	const bool ok = DoomVR_GunStart(t1, hand, origin);
@@ -1710,7 +1855,11 @@ bool DoomVR_ShotFromGun(AActor* t1, bool offhand, bool melee, DVector3& origin)
 	{
 		++logged;
 		const DVector3 body = t1->PosAtZ(t1->Center() - t1->Floorclip + t1->AttackOffset());
-		if (ok) Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: shot from the gun, %.2f m from the body's start\n", (hand - body).Length() / vr_hunits_per_meter);
+		// And from the hand as placed for the tic (AttackPos): the muzzle sits a
+		// gun's length from it, never more.
+		const DVector3 held = *(DVector3*)t1->ScriptVar(FName("AttackPos"), nullptr);
+		if (ok) Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: shot from the gun, %.2f m from the body's start, %.2f m from the hand (aim %.0f deg off the body)\n",
+			(hand - body).Length() / vr_hunits_per_meter, (hand - held).Length() / vr_hunits_per_meter, t1->Angles.Yaw.Degrees() - bodyYaw);
 		else Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: shot from the body - the gun hand is behind a wall\n");
 	}
 	return ok;
@@ -1741,9 +1890,9 @@ bool DoomVR_IsCasing(PClassActor* type)
 
 bool DoomVR_EjectFromGun(AActor* t1, DVector3& origin)
 {
-	if (!vr_shots_from_gun || vr_shots_from_hand) return false;
-	if (netgame || demoplayback || demorecording) return false;
-	if (t1 == nullptr || t1->player != &players[consoleplayer] || t1->player->mo != t1) return false;
+	if (vr_shots_from_hand || demoplayback || demorecording) return false;
+	if (t1 == nullptr || t1->player == nullptr || t1->player->mo != t1) return false;
+	if (!DoomVR_PlayerSetting(t1->player, VRF_GUNSHOTS, vr_shots_from_gun)) return false;
 	if (DoomVR_WeaponActionDepth == 0 || DoomVR_OffhandActionDepth > 0) return false;
 	if (!t1->BoolVar(FName("DoomVRAttackTracked"))) return false;
 	const DVector3 hand = *(DVector3*)t1->ScriptVar(FName("AttackPos"), nullptr);
@@ -1829,7 +1978,7 @@ struct DoomVRWeaponShot
 static TMap<FName, DoomVRWeaponShot> DoomVR_WeaponShots;
 
 // A game switched in this process: its weapons' classes are gone.
-void DoomVR_ShotsForgetGame() { DoomVR_WeaponShots.Clear(); DoomVR_Muzzle.weapon = nullptr; }
+void DoomVR_ShotsForgetGame() { DoomVR_WeaponShots.Clear(); DoomVR_Muzzle.weapon = nullptr; DoomVR_Barrel.weapon = nullptr; }
 
 // The local player's own main-hand weapon, firing now.
 static DoomVRWeaponShot* DoomVR_ShotRecord(AActor* t1, bool offhand)
@@ -1997,11 +2146,189 @@ bool DoomVR_CrosshairShot(DVector3& hit, DAngle drawnYaw, DVector3 drawnEye)
 	return true;
 }
 
+/*
+	DoomVR: which way the player's own actor faces while it ticks (DThinker::
+	CallTick), for mods that read "where the player looks" from the pawn's
+	angle and pitch - Doom Infinite's "point at the gun and press Use".
+	In order:
+	  1. the head, if a line from the eyes that way meets a thing within
+	     96 units;
+	  2. else the right controller, the red dot: if its line meets a thing
+	     within 128 units, the body faces from the eyes to that thing's
+	     middle, so a line from the eyes reaches what the hand points at;
+	  3. else the head.
+	In a headset you look down at a thing at your feet more with your eyes
+	than your head, and walking up onto a gun put it under the head's line
+	altogether, so the head alone never picked it up. False with no headset.
+*/
+static AActor* DoomVR_WalkFocusNear(AActor* mo);
+bool DoomVR_PawnLook(AActor* mo, DAngle& yaw, DAngle& pitch)
+{
+	double lookYaw, lookPitch;
+	if (mo == nullptr || mo->player == nullptr || !DoomVR_PlayerLook(mo->player, lookYaw, lookPitch)) return false;
+	const DAngle body = mo->Angles.Yaw;
+	yaw = body + DAngle::fromDeg(lookYaw);
+	pitch = DAngle::fromDeg(lookPitch);
+	const double eye = mo->player->viewz - mo->Z();
+	// A gun just walked onto (DoomVR_ModWalkOver): look at it, for the mod.
+	if (AActor* gun = DoomVR_WalkFocusNear(mo))
+	{
+		const DVector3 to = gun->PosPlusZ(gun->Height / 2) - mo->PosPlusZ(eye);
+		yaw = DAngle::fromDeg(atan2(to.Y, to.X) * (180.0 / M_PI));
+		pitch = DAngle::fromDeg(-atan2(to.Z, to.XY().Length()) * (180.0 / M_PI));
+		return true;
+	}
+	const int flags = TRF_ALLACTORS | TRF_BLOCKSELF;
+	FLineTraceData d;
+	if (P_LineTrace(mo, yaw, 96., pitch, flags, eye, 0, 0, &d) && d.HitType == TRACE_HitActor && d.HitActor && d.HitActor != mo) return true;
+	double aimYaw, aimPitch;
+	if (!DoomVR_PlayerAim(mo->player, aimYaw, aimPitch) || !mo->BoolVar(FName("DoomVRAttackTracked"))) return true;
+	const DVector3 hand = *(DVector3*)mo->ScriptVar(FName("AttackPos"), nullptr);
+	if (!P_LineTrace(mo, body + DAngle::fromDeg(aimYaw), 128., DAngle::fromDeg(aimPitch), flags | TRF_ABSPOSITION, hand.Z, hand.X, hand.Y, &d)
+	    || d.HitType != TRACE_HitActor || !d.HitActor || d.HitActor == mo) return true;
+	const DVector3 at = d.HitActor->PosPlusZ(d.HitActor->Height / 2);
+	const DVector3 from = mo->PosPlusZ(eye);
+	const DVector3 to = at - from;
+	yaw = DAngle::fromDeg(atan2(to.Y, to.X) * (180.0 / M_PI));
+	pitch = DAngle::fromDeg(-atan2(to.Z, to.XY().Length()) * (180.0 / M_PI));
+	return true;
+}
+
+/*
+	DoomVR: walk onto a gun and it is yours, for a mod whose guns are picked up
+	only by pointing at them and pressing Use - Doom Infinite's unique and
+	modded weapons (InfiniteWeapon). In a headset you walk to a gun on the
+	floor as to any pickup; pointing down at your feet is not how a player
+	picks a thing up. Only a gun the player has just stepped onto counts (not
+	touching it a tic ago): the one the mod drops when it swaps guns lands
+	under the player and is not picked straight back up.
+	Stepping onto it turns the body's look to it for a few tics (DoomVR_
+	PawnLook), so the mod's own look trace finds it as if the player looked
+	at it; once the mod says it is looking at it, the mod's own Use runs
+	(DoomInfiniteHandler.ProcessTouchInput, its touch-device Use) - so
+	cooldowns, swaps and its tutorial all go as the mod has them.
+*/
+static AActor* DoomVR_WalkFocus = nullptr;	// compared, never followed, until found again near the player
+static int DoomVR_WalkFocusTics = 0;
+
+static bool DoomVR_ModWeapon(AActor* t, PClassActor* weaponClass)
+{
+	return t->IsKindOf(weaponClass) && t->PointerVar<AActor>(NAME_Owner) == nullptr
+		&& (t->BoolVar(FName("isUnique")) || t->BoolVar(FName("isModded"))) && t->IntVar(FName("interactionCounter")) <= 0;
+}
+
+// The walk-over gun, if it is still lying near the player (found by address
+// among the things nearby, so a gun that is gone is never touched).
+static AActor* DoomVR_WalkFocusNear(AActor* mo)
+{
+	if (DoomVR_WalkFocusTics <= 0 || DoomVR_WalkFocus == nullptr) return nullptr;
+	PClassActor* weaponClass = PClass::FindActor("InfiniteWeapon");
+	if (weaponClass == nullptr) return nullptr;
+	FPortalGroupArray check;
+	FMultiBlockThingsIterator it(check, mo->Level, mo->X(), mo->Y(), mo->Z() - 64, mo->Height + 128, mo->radius + 64, false, mo->Sector);
+	FMultiBlockThingsIterator::CheckResult cres;
+	while (it.Next(&cres))
+		if (cres.thing == DoomVR_WalkFocus && DoomVR_ModWeapon(cres.thing, weaponClass)) return cres.thing;
+	return nullptr;
+}
+
+void DoomVR_ModWalkOver(AActor* mo)
+{
+	static DVector3 lastPos;
+	static int lastTic = -100;
+	static FLevelLocals* lastLevel = nullptr;
+	// Single player only: the mod's Use is run straight from here, not from a command.
+	if (netgame || mo == nullptr || mo->player == nullptr || !DoomVR_Active() || mo->health <= 0) { DoomVR_WalkFocusTics = 0; return; }
+	const int tic = mo->Level->maptime;
+	const bool fresh = lastLevel != mo->Level || tic != lastTic + 1;
+	const DVector3 was = fresh ? mo->Pos() : lastPos;
+	lastPos = mo->Pos(); lastTic = tic; lastLevel = mo->Level;
+	if (fresh) { DoomVR_WalkFocusTics = 0; return; }
+	PClassActor* weaponClass = PClass::FindActor("InfiniteWeapon");
+	PClass* handler = PClass::FindClass("DoomInfiniteHandler");
+	if (weaponClass == nullptr || handler == nullptr) return;
+	auto fn = dyn_cast<PFunction>(handler->FindSymbol("ProcessTouchInput", false));
+	auto fTrace = dyn_cast<PField>(mo->GetClass()->FindSymbol("user_traceActor", true));
+	if (fn == nullptr || fTrace == nullptr) return;
+
+	// A gun stepped onto, a tic or more ago: has the mod's look found it yet?
+	if (DoomVR_WalkFocusTics > 0)
+	{
+		AActor* gun = DoomVR_WalkFocusNear(mo);
+		AActor* seen = *(AActor**)((uint8_t*)mo + fTrace->Offset);
+		if (gun != nullptr && seen == gun)
+		{
+			DoomVR_WalkFocusTics = 0;
+			Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: walked onto %s - the mod's own Use picks it up\n", gun->GetClass()->TypeName.GetChars());
+			VMValue params[] = { DoomVR_DIKeys.use /* the mod's own KEY_USE */, mo };
+			VMCall(fn->Variants[0].Implementation, params, 2, nullptr, 0);
+			return;
+		}
+		if (gun == nullptr || --DoomVR_WalkFocusTics <= 0)
+		{
+			if (gun != nullptr) Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: walked onto %s, but the mod never looked at it\n", gun->GetClass()->TypeName.GetChars());
+			DoomVR_WalkFocusTics = 0;
+		}
+		return;
+	}
+
+	auto touching = [&](AActor* t, const DVector3& at) {
+		const double reach = mo->radius + t->radius;
+		return fabs(t->X() - at.X) < reach && fabs(t->Y() - at.Y) < reach && t->Z() <= at.Z + mo->Height && t->Top() >= at.Z;
+	};
+	FPortalGroupArray check;
+	FMultiBlockThingsIterator it(check, mo->Level, mo->X(), mo->Y(), mo->Z() - 64, mo->Height + 128, mo->radius + 64, false, mo->Sector);
+	FMultiBlockThingsIterator::CheckResult cres;
+	while (it.Next(&cres))
+	{
+		AActor* t = cres.thing;
+		if (t == mo || !DoomVR_ModWeapon(t, weaponClass)) continue;
+		if (!touching(t, mo->Pos()) || touching(t, was)) continue;
+		DoomVR_WalkFocus = t;
+		DoomVR_WalkFocusTics = 6;
+		return;
+	}
+}
+
+/*
+	DoomVR: Doom Infinite's own menus (its mod screen, its shop) move on the
+	arrow keys or its touch-device input; in a headset the stick walks, and the
+	player stands frozen while one is open. So while one is open the sticks move
+	it, through the mod's own touch input (DoomInfiniteHandler.ProcessTouchInput).
+*/
+bool DoomVR_ModMenuOpen()
+{
+	if (netgame || !DoomVR_Active() || gamestate != GS_LEVEL || !DoomVR_IsDoomInfinite()) return false;
+	AActor* mo = players[consoleplayer].mo;
+	if (mo == nullptr) return false;
+	auto f = dyn_cast<PField>(mo->GetClass()->FindSymbol("currentMenuID", true));
+	return f != nullptr && *(int*)((uint8_t*)mo + f->Offset) != 0;
+}
+
+CCMD(vr_modmenu)
+{
+	if (argv.argc() < 2 || !DoomVR_ModMenuOpen()) return;
+	AActor* mo = players[consoleplayer].mo;
+	PClass* handler = PClass::FindClass("DoomInfiniteHandler");
+	auto fn = handler ? dyn_cast<PFunction>(handler->FindSymbol("ProcessTouchInput", false)) : nullptr;
+	if (fn == nullptr) return;
+	// The mod's own forward, back, left and right keys, read from its scripts (DoomVR_DIKeys).
+	int modKey = -1;
+	if (!stricmp(argv[1], "up")) modKey = DoomVR_DIKeys.up;
+	else if (!stricmp(argv[1], "down")) modKey = DoomVR_DIKeys.down;
+	else if (!stricmp(argv[1], "left")) modKey = DoomVR_DIKeys.left;
+	else if (!stricmp(argv[1], "right")) modKey = DoomVR_DIKeys.right;
+	if (modKey < 0) return;
+	VMValue params[] = { modKey, mo };
+	VMCall(fn->Variants[0].Implementation, params, 2, nullptr, 0);
+}
+
 DEFINE_ACTION_FUNCTION(APlayerPawn, DoomVRAim)
 {
 	PARAM_PROLOGUE;
 	double yaw = 0, pitch = 0;
-	const bool ok = !vr_shots_from_hand && DoomVR_GetAim(yaw, pitch);
+	const player_t* who = DoomVR_Thinking != nullptr ? DoomVR_Thinking : (netgame ? nullptr : &players[consoleplayer]);
+	const bool ok = !vr_shots_from_hand && DoomVR_PlayerAim(who, yaw, pitch);
 	ACTION_RETURN_VEC3(DVector3(ok ? yaw : 0., ok ? pitch : 0., ok ? 1. : 0.));
 }
 
@@ -2012,21 +2339,24 @@ CVAR(Bool, vr_instant_switch, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 DEFINE_ACTION_FUNCTION(APlayerPawn, DoomVRInstantSwitch)
 {
 	PARAM_PROLOGUE;
-	ACTION_RETURN_BOOL(vr_instant_switch && DoomVR_Active());
+	const player_t* who = DoomVR_Thinking != nullptr ? DoomVR_Thinking : (netgame ? nullptr : &players[consoleplayer]);
+	ACTION_RETURN_BOOL(DoomVR_PlayerHeadset(who) && DoomVR_PlayerSetting(who, VRF_INSTANT, vr_instant_switch));
 }
 
 // DoomVR: in the headset now (the death camera keeps the player's own heading).
 DEFINE_ACTION_FUNCTION(APlayerPawn, DoomVRHeadset)
 {
 	PARAM_PROLOGUE;
-	ACTION_RETURN_BOOL(DoomVR_Active());
+	const player_t* who = DoomVR_Thinking != nullptr ? DoomVR_Thinking : (netgame ? nullptr : &players[consoleplayer]);
+	ACTION_RETURN_BOOL(DoomVR_PlayerHeadset(who));
 }
 
 DEFINE_ACTION_FUNCTION(APlayerPawn, DoomVRLook)
 {
 	PARAM_PROLOGUE;
-	double yaw = 0;
-	const bool ok = DoomVR_GetLookYaw(yaw);
+	double yaw = 0, pitch = 0;
+	const player_t* who = DoomVR_Thinking != nullptr ? DoomVR_Thinking : (netgame ? nullptr : &players[consoleplayer]);
+	const bool ok = netgame ? DoomVR_PlayerLook(who, yaw, pitch) : (who == &players[consoleplayer] && DoomVR_GetLookYaw(yaw));
 	ACTION_RETURN_VEC3(DVector3(ok ? yaw : 0., 0., ok ? 1. : 0.));
 }
 
@@ -2078,6 +2408,18 @@ void P_CheckUse(player_t *player)
 		if (!player->usedown)
 		{
 			player->usedown = true;
+			// DoomVR: for a mod that picks up by pointing (Doom Infinite's
+			// user_traceActor), what it is pointing at when Use goes down.
+			if (DoomVR_Active() && player == &players[consoleplayer] && player->mo)
+			{
+				auto f = dyn_cast<PField>(player->mo->GetClass()->FindSymbol("user_traceActor", true));
+				if (f && f->Type->isObjectPointer())
+				{
+					AActor* at = *(AActor**)((uint8_t*)player->mo + f->Offset);
+					Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: Use pressed; the mod is pointing at %s%s\n",
+					       at ? at->GetClass()->TypeName.GetChars() : "nothing", at ? "" : " (its line from the eyes hits nothing it can take)");
+				}
+			}
 			if (!P_TalkFacing(player->mo))
 			{
 				P_UseLines(player);
@@ -2207,18 +2549,21 @@ static void DoomVR_RoomWalk(player_t* player)
 */
 CVAR(Bool, vr_phys_use, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 static const int kHandPressHold = 52;
-static const line_t* handPressedLine[2];
-static int handPressedAt[2];
+static const line_t* handPressedLine[MAXPLAYERS][2];
+static int handPressedAt[MAXPLAYERS][2];
 bool DoomVR_HandJustPressed(const line_t* line, int maptime)
 {
-	for (int hand = 0; hand < 2; ++hand)
-		if (handPressedLine[hand] == line && maptime >= handPressedAt[hand] && maptime - handPressedAt[hand] < kHandPressHold)
-			return true;
+	for (int pl = 0; pl < MAXPLAYERS; ++pl)
+		for (int hand = 0; hand < 2; ++hand)
+			if (handPressedLine[pl][hand] == line && maptime >= handPressedAt[pl][hand] && maptime - handPressedAt[pl][hand] < kHandPressHold)
+				return true;
 	return false;
 }
 static void DoomVR_TouchUse(player_t* player, int hand, const DVector3& pos)
 {
-	static line_t* touching[2];
+	static line_t* touchingAll[MAXPLAYERS][2];
+	const int pnum = int(player - players);
+	line_t** touching = touchingAll[pnum];
 	AActor* mo = player->mo;
 	FBoundingBox box(pos.X, pos.Y, 12.);
 	FBlockLinesIterator it(mo->Level, box);
@@ -2249,8 +2594,8 @@ static void DoomVR_TouchUse(player_t* player, int hand, const DVector3& pos)
 	DVector3 at = pos;
 	if (P_ActivateLine(best, mo, side, SPAC_Use, &at))
 	{
-		handPressedLine[hand] = best;
-		handPressedAt[hand] = mo->Level->maptime;
+		handPressedLine[pnum][hand] = best;
+		handPressedAt[pnum][hand] = mo->Level->maptime;
 		Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: %s hand pressed line %d (special %d)\n", hand == 0 ? "weapon" : "other", best->Index(), best->special);
 	}
 }
@@ -2258,8 +2603,6 @@ static void DoomVR_TouchUse(player_t* player, int hand, const DVector3& pos)
 static void DoomVR_SetHands(player_t* player)
 {
 	AActor* mo = player->mo;
-	const bool local = player == &players[consoleplayer];
-	const double u = vr_hunits_per_meter;
 	const double yaw = mo->Angles.Yaw.Degrees();
 	const double eyez = player->viewz;
 	static const FName names[2][4] = {
@@ -2271,16 +2614,16 @@ static void DoomVR_SetHands(player_t* player)
 		DVector3 pos;
 		double a, p, r;
 		double right, up, forward, hy, hp, hr;
-		const bool tracked = local && DoomVR_HandPose(hand, right, up, forward, hy, hp, hr);
+		const bool tracked = DoomVR_PlayerHand(player, hand, right, up, forward, hy, hp, hr);	// map units
 		static const FName trackedNames[2] = { "DoomVRAttackTracked", "DoomVROffhandTracked" };
 		mo->BoolVar(trackedNames[hand]) = tracked;
 		if (tracked)
 		{
 			const double t = yaw * (M_PI / 180.0);
 			pos = mo->Pos();
-			pos.X += (forward * cos(t) + right * sin(t)) * u;
-			pos.Y += (forward * sin(t) - right * cos(t)) * u;
-			pos.Z = eyez + (up + vr_height_adjust) * u;
+			pos.X += forward * cos(t) + right * sin(t);
+			pos.Y += forward * sin(t) - right * cos(t);
+			pos.Z = eyez + up;
 			a = yaw + hy - 90.0;
 			p = hp;
 			r = hr;
@@ -2333,6 +2676,51 @@ static void DoomVR_PlayerFeedback(player_t* player)
 		DoomVR_Pulse(3, 0.1f + 0.2f * hurt, 0.4f + 0.6f * hurt, "hurt");
 	}
 	lastDamage = player->damagecount;
+}
+
+// DoomVR, network games: the headset into the local player's command, for
+// every machine's playsim to read (see DoomVR_PlayerHand and the rest above).
+void DoomVR_FillCmd(usercmd_t* cmd)
+{
+	memset(cmd->vr, 0, sizeof(cmd->vr));
+	if (!netgame || !DoomVR_Active()) return;
+	auto angle = [](double deg) { return int16_t(std::clamp<long>(lrint(remainder(deg, 360.0) * 100.0), -32767, 32767)); };
+	auto units = [](double mu) { return int16_t(std::clamp<long>(lrint(mu * 8.0), -32767, 32767)); };
+	int flags = VRF_HEADSET;
+	double a, b;
+	if (DoomVR_GetAim(a, b)) { flags |= VRF_AIM; cmd->vr[VRC_AIM_YAW] = angle(a); cmd->vr[VRC_AIM_PITCH] = angle(b); }
+	if (DoomVR_GetLook(a, b)) { flags |= VRF_LOOK; cmd->vr[VRC_LOOK_YAW] = angle(a); cmd->vr[VRC_LOOK_PITCH] = angle(b); }
+	const double u = vr_hunits_per_meter;
+	for (int hand = 0; hand < 2; ++hand)
+	{
+		double right, up, forward, hy, hp, hr;
+		if (!DoomVR_HandPose(hand, right, up, forward, hy, hp, hr)) continue;
+		flags |= hand ? VRF_HAND1 : VRF_HAND0;
+		int16_t* v = &cmd->vr[hand ? VRC_HAND1 : VRC_HAND0];
+		v[0] = units(right * u); v[1] = units((up + vr_height_adjust) * u); v[2] = units(forward * u);
+		v[3] = angle(hy); v[4] = angle(hp); v[5] = angle(hr);
+	}
+	if (vr_shots_model_muzzle && DoomVR_Muzzle.weapon != nullptr && DoomVR_Muzzle.weapon == players[consoleplayer].ReadyWeapon)
+	{
+		const double p[3] = { DoomVR_Muzzle.right, DoomVR_Muzzle.up, -DoomVR_Muzzle.ahead };
+		double right, up, forward;
+		if (DoomVR_HandPointPose(0, p, right, up, forward))
+		{
+			flags |= VRF_MUZZLE;
+			cmd->vr[VRC_MUZZLE] = units(right * u);
+			cmd->vr[VRC_MUZZLE + 1] = units((up + vr_height_adjust) * u);
+			cmd->vr[VRC_MUZZLE + 2] = units(forward * u);
+		}
+	}
+	double speed;
+	const double power = DoomVR_SwingPower(speed);
+	if (power > 1.0) cmd->vr[VRC_SWING] = int16_t(std::min<long>(lrint(power * 100.0), 32767));
+	if (DoomVR_ViewBob() == 0.0) flags |= VRF_NOBOB;
+	if (DoomVR_RealCrouch()) flags |= VRF_CROUCH;
+	if (vr_shots_from_gun) flags |= VRF_GUNSHOTS;
+	if (vr_phys_use) flags |= VRF_PHYSUSE;
+	if (vr_instant_switch) flags |= VRF_INSTANT;
+	cmd->vr[VRC_FLAGS] = int16_t(flags);
 }
 
 void P_PlayerThink (player_t *player)
@@ -2394,16 +2782,19 @@ void P_PlayerThink (player_t *player)
 
 	if (player->mo != nullptr) DoomVR_RoomWalk(player);
 	if (player->mo != nullptr) DoomVR_SetHands(player);
-	if (player->mo != nullptr && vr_phys_use && player == &players[consoleplayer] && player->playerstate == PST_LIVE)
+	if (player->mo != nullptr && DoomVR_PlayerSetting(player, VRF_PHYSUSE, vr_phys_use) && player->playerstate == PST_LIVE)
 		for (int hand = 0; hand < 2; ++hand)
 			if (player->mo->BoolVar(hand == 0 ? FName("DoomVRAttackTracked") : FName("DoomVROffhandTracked")))
 				DoomVR_TouchUse(player, hand, *(DVector3*)player->mo->ScriptVar(hand == 0 ? FName("AttackPos") : FName("OffhandPos"), nullptr));
 
+	player_t* const wasThinking = DoomVR_Thinking;
+	DoomVR_Thinking = player;
 	IFVIRTUALPTRNAME(player->mo, NAME_PlayerPawn, PlayerThink)
 	{
 		VMValue param = player->mo;
 		VMCall(func, &param, 1, nullptr, 0);
 	}
+	DoomVR_Thinking = wasThinking;
 
 	// DoomVR: the headset player's eyes do not bob unless vr_view_bob is on.
 	// Done here, after the pawn's own think, rather than in the stock
@@ -2411,7 +2802,7 @@ void P_PlayerThink (player_t *player)
 	// CE does), and the bob came back with them. The eye height is the
 	// stock one without the bob - body, view height (crouching, landing),
 	// floor clip, and the same 4-unit margins from floor and ceiling.
-	if (player == &players[consoleplayer] && player->mo != nullptr && DoomVR_ViewBob() == 0.0)
+	if (player->mo != nullptr && DoomVR_PlayerSetting(player, VRF_NOBOB, DoomVR_ViewBob() == 0.0))
 	{
 		AActor* mo = player->mo;
 		double z = mo->Z() + player->viewheight;
@@ -2425,7 +2816,7 @@ void P_PlayerThink (player_t *player)
 	// DoomVR: crouching for real - the head is already down, so the game's
 	// crouch lowers the body, not the eyes a second time (crouchoffset is
 	// the view drop the crouch made; it is zero or less).
-	if (player == &players[consoleplayer] && player->mo != nullptr && player->crouchoffset < 0 && DoomVR_RealCrouch())
+	if (player->mo != nullptr && player->crouchoffset < 0 && DoomVR_PlayerSetting(player, VRF_CROUCH, DoomVR_RealCrouch()))
 		player->viewz = std::min(player->viewz - player->crouchoffset, player->mo->ceilingz - 4);
 
 	// DoomVR: the controllers answer what this tic did - ammo spent is a

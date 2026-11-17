@@ -298,6 +298,8 @@ struct Session::Impl {
     bool IsD3D() const { return false; }
 #endif
     std::string runtimeName;
+    uint64_t runtimeVersion = 0;
+    bool flipEyes = false;      // the eye copy turns the picture over (Config::flipEyes)
     std::string failure;
 
     float debugYaw = 0.0f;
