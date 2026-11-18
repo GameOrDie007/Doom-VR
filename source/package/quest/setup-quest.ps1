@@ -181,8 +181,8 @@ function Combine-Path([string] $a, [string] $b) {
 
 # A set-up Doom VR game folder: the launchers Setup wrote and the games they start.
 function Is-GameFolder([string] $dir) {
-    return (Test-Path -LiteralPath (Join-Path $dir 'launchers')) -and (Test-Path -LiteralPath (Join-Path $dir 'wads')) -and
-           @(Get-ChildItem -LiteralPath (Join-Path $dir 'launchers') -Filter '*.bat' -File -ErrorAction SilentlyContinue).Count -gt 0
+    return (Test-Path -LiteralPath (Combine-Path $dir 'launchers')) -and (Test-Path -LiteralPath (Combine-Path $dir 'wads')) -and
+           @(Get-ChildItem -LiteralPath (Combine-Path $dir 'launchers') -Filter '*.bat' -File -ErrorAction SilentlyContinue).Count -gt 0
 }
 
 # The game folder in or under a folder the player named: the folder itself, its VR\game, its game.
