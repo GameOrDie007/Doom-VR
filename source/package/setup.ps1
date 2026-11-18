@@ -300,9 +300,9 @@ function Search-Roots {
     try { $drives = [System.IO.DriveInfo]::GetDrives() | Where-Object { $_.DriveType -eq 'Fixed' -and $_.IsReady } | ForEach-Object { $_.RootDirectory.FullName } } catch { $drives = @('C:\') }
     foreach ($dr in $drives) {
         foreach ($f in @('DOOM + DOOM II', 'Ultimate Doom')) {
-            Add-Root (Join-Path $dr ('GOG Games\' + $f))
-            Add-Root (Join-Path $dr ('GOG Galaxy\Games\' + $f))
-            Add-Root (Join-Path $dr ('Games\' + $f))
+            Add-Root (Combine-Path $dr ('GOG Games\' + $f))
+            Add-Root (Combine-Path $dr ('GOG Galaxy\Games\' + $f))
+            Add-Root (Combine-Path $dr ('Games\' + $f))
         }
     }
 }
