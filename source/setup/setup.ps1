@@ -579,7 +579,7 @@ if (-not $LinkWads) {
         CopyIn $f.path $wadsDir "wads" $f.from
         $srcDir = Split-Path -Parent $f.path
         foreach ($c in $companions) {
-            $cp = Join-Path $srcDir $c
+            $cp = Combine-Path $srcDir $c
             if (Test-Path -LiteralPath $cp) { CopyIn $cp $wadsDir "wads" $f.from }
         }
     }

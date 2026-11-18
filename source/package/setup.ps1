@@ -208,7 +208,7 @@ function True-Case([string] $p) {
         if (-not $d.Parent) { return $d.FullName.ToUpper() }
         $match = $d.Parent.GetDirectories($d.Name) | Select-Object -First 1
         if (-not $match) { return $p }
-        return (Join-Path (True-Case $d.Parent.FullName) $match.Name)
+        return (Combine-Path (True-Case $d.Parent.FullName) $match.Name)
     } catch { return $p }
 }
 
