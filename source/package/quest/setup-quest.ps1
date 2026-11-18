@@ -173,6 +173,12 @@ function Size-Text([long] $bytes) {
 
 # --- the game folder: the PC version's, or one put together here -----------------------
 
+# Join-Path throws on a drive that is not there (a Steam library on a removed disk, a stale
+# GOG entry) and stops the whole search; this returns "" instead, and Test-Path "" is False.
+function Combine-Path([string] $a, [string] $b) {
+    try { return [System.IO.Path]::Combine($a, $b) } catch { return '' }
+}
+
 # A set-up Doom VR game folder: the launchers Setup wrote and the games they start.
 function Is-GameFolder([string] $dir) {
     return (Test-Path -LiteralPath (Join-Path $dir 'launchers')) -and (Test-Path -LiteralPath (Join-Path $dir 'wads')) -and
@@ -182,7 +188,7 @@ function Is-GameFolder([string] $dir) {
 # The game folder in or under a folder the player named: the folder itself, its VR\game, its game.
 function GameFolder-In([string] $dir) {
     if (-not $dir -or -not (Test-Path -LiteralPath $dir)) { return $null }
-    foreach ($c in @($dir, (Join-Path $dir 'game'), (Join-Path $dir 'VR\game'))) {
+    foreach ($c in @($dir, (Combine-Path $dir 'game'), (Combine-Path $dir 'VR\game'))) {
         if ((Test-Path -LiteralPath $c) -and (Is-GameFolder $c)) { return (Resolve-Path -LiteralPath $c).ProviderPath }
     }
     return $null
@@ -198,8 +204,8 @@ function Steam-Libraries {
     if (-not $root) { return $libs }
     $root = $root.Replace('/', '\')
     $libs += $root
-    $vdf = Join-Path $root 'steamapps\libraryfolders.vdf'
-    if (Test-Path -LiteralPath $vdf) {
+    $vdf = Combine-Path $root 'steamapps\libraryfolders.vdf'
+    if ($vdf -and (Test-Path -LiteralPath $vdf)) {
         foreach ($m in [regex]::Matches((Get-Content -LiteralPath $vdf -Raw), '"path"\s+"([^"]+)"')) {
             $p = $m.Groups[1].Value.Replace('\\', '\')
             if ($libs -notcontains $p) { $libs += $p }
@@ -219,10 +225,10 @@ function Find-PcGame {
     if ($NoSearch) { return $null }
     $found = @()
     foreach ($lib in Steam-Libraries) {
-        $common = Join-Path $lib 'steamapps\common'
-        if (-not (Test-Path -LiteralPath $common)) { continue }
+        $common = Combine-Path $lib 'steamapps\common'
+        if (-not $common -or -not (Test-Path -LiteralPath $common)) { continue }
         foreach ($d in Get-ChildItem -LiteralPath $common -Directory -ErrorAction SilentlyContinue) {
-            $g = GameFolder-In (Join-Path $d.FullName 'VR')
+            $g = GameFolder-In (Combine-Path $d.FullName 'VR')
             if ($g) { $found += $g }
         }
     }
@@ -230,7 +236,7 @@ function Find-PcGame {
         if (-not (Test-Path $k)) { continue }
         foreach ($sub in Get-ChildItem -Path $k -ErrorAction SilentlyContinue) {
             try { $p = (Get-ItemProperty -Path $sub.PSPath -ErrorAction Stop).path } catch { continue }
-            $g = GameFolder-In (Join-Path $p 'VR')
+            $g = GameFolder-In (Combine-Path $p 'VR')
             if ($g) { $found += $g }
         }
     }
