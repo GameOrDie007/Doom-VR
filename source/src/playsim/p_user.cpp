@@ -2782,7 +2782,10 @@ void P_PlayerThink (player_t *player)
 
 	if (player->mo != nullptr) DoomVR_RoomWalk(player);
 	if (player->mo != nullptr) DoomVR_SetHands(player);
-	if (player->mo != nullptr && DoomVR_PlayerSetting(player, VRF_PHYSUSE, vr_phys_use) && player->playerstate == PST_LIVE)
+	// Never while predicting (a client re-running its own moves ahead of the
+	// network): the game's own Use waits for the real tic too (player.zs), else
+	// a hand opens a door on the joiner's machine only and the game desyncs.
+	if (player->mo != nullptr && !(player->cheats & CF_PREDICTING) && DoomVR_PlayerSetting(player, VRF_PHYSUSE, vr_phys_use) && player->playerstate == PST_LIVE)
 		for (int hand = 0; hand < 2; ++hand)
 			if (player->mo->BoolVar(hand == 0 ? FName("DoomVRAttackTracked") : FName("DoomVROffhandTracked")))
 				DoomVR_TouchUse(player, hand, *(DVector3*)player->mo->ScriptVar(hand == 0 ? FName("AttackPos") : FName("OffhandPos"), nullptr));
