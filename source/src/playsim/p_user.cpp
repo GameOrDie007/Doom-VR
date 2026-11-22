@@ -1638,6 +1638,8 @@ CVAR(Bool, vr_shots_from_hand, false, 0)
 EXTERN_CVAR(Float, vr_weapon_tilt)
 // The held gun's barrel as drawn, degrees up from the aim (DoomVR_NoteBarrel, below).
 static struct { const void* weapon = nullptr; double pitch = 0; } DoomVR_Barrel;
+static bool DoomVR_MuzzleAt(const DVector3& bodyXY, double eyeZ, double yawDeg, DVector3& at);
+static bool DoomVR_GunStart(AActor* mo, const DVector3& hand, DVector3& origin);
 
 bool DoomVR_ShotFromHand(AActor* t1, bool offhand, DAngle& angle, DAngle& pitch, DVector3& origin)
 {
@@ -1661,11 +1663,21 @@ bool DoomVR_ShotFromHand(AActor* t1, bool offhand, DAngle& angle, DAngle& pitch,
 		DoomVR_Barrel.weapon == t1->player->ReadyWeapon && fabs(DoomVR_Barrel.pitch - vr_weapon_tilt) > 10.0)
 	{
 		dp += (DoomVR_Barrel.pitch - vr_weapon_tilt) * (M_PI / 180.0);
+		// And from its muzzle, measured from the model as drawn, not from the
+		// controller: a long gun held in two hands (Brutal Doom's minigun) has
+		// the controller back by the body, and the shots left the shoulder
+		// (GitHub #2, 22 Nov). The body's own yaw, as DoomVR_ShotFromGun takes it.
+		double bodyYaw = t1->Angles.Yaw.Degrees(), aimYaw, aimPitch;
+		if (DoomVR_PlayerAim(t1->player, aimYaw, aimPitch)) bodyYaw -= aimYaw;
+		DVector3 muzzle, start;
+		const bool atMuzzle = DoomVR_MuzzleAt(t1->Pos(), t1->player->viewz, bodyYaw, muzzle) && DoomVR_GunStart(t1, muzzle, start);
+		if (atMuzzle) origin = start;
 		static int logged = 0;
 		if (logged < 8)
 		{
 			++logged;
-			Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: shot from the hand along the barrel, %.1f deg up from the mods' tilt\n", DoomVR_Barrel.pitch - vr_weapon_tilt);
+			Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: shot from the hand along the barrel, %.1f deg up from the mods' tilt, from %s\n",
+			       DoomVR_Barrel.pitch - vr_weapon_tilt, atMuzzle ? "the muzzle" : "the hand");
 		}
 	}
 	if (offhand) da = -da;
