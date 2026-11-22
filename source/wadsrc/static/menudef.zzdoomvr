@@ -211,6 +211,9 @@ OptionMenu "DoomVRPhysical" protected
 	Option "Holsters on your body (grip to draw)", "vr_phys_holsters", "OnOff"
 	StaticText "Hip: your one-handed gun. Top of the shoulder:"
 	StaticText "your two-handed gun. Squeeze there again to put it back."
+	Option "More guns on your body", "vr_phys_body_slots", "OnOff"
+	StaticText "Your other guns: other shoulder, other hip, chest."
+	StaticText "Ammo and grenades on your other side, where the mod has them."
 	Slider "Seated reach (lifts the holsters, m)", "vr_phys_holster_lift", 0.0, 0.2, 0.02, 2
 	Option "Two hands on long guns", "vr_phys_twohand", "OnOff"
 	Option "Two-handed aim", "vr_phys_twohand_stock", "DoomVRTwoHandAim"

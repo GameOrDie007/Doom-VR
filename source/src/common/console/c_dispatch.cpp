@@ -747,6 +747,14 @@ void C_ArchiveAliases (FConfigFile *f)
 	}
 }
 
+// DoomVR: whether a mod made this console alias (its KEYCONF), for the body
+// places that run a mod's own action (Brutal Doom's "reload", "grenadetoss").
+bool C_AliasExists (const char *name)
+{
+	FConsoleCommand *cmd = FindNameInHashTable (Commands, name, strlen (name));
+	return cmd != nullptr && cmd->IsAlias ();
+}
+
 void C_ClearAliases ()
 {
 	int bucket;

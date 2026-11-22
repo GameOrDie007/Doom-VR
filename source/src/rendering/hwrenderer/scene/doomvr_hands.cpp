@@ -74,6 +74,7 @@ CVAR(Bool, vr_hands, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // other games keep their own hands.
 CVAR(Int, vr_hands_style, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(Int, vr_style)
+EXTERN_CVAR(Bool, vr_phys_body_slots)	// doomvr_headset.cpp
 EXTERN_CVAR(Bool, r_drawplayersprites)
 EXTERN_CVAR(Bool, r_deathcamera)
 
@@ -655,6 +656,23 @@ namespace
 	*/
 	PClassActor* gHolsterLast[3];	// [1] the hip's, [2] the shoulder's
 
+	/*
+		More places on the body (vr_phys_body_slots): every other gun carried
+		rides on the body too, unseen until the gun hand comes near - holster 2
+		the other shoulder, 3 the other hip (a cross draw), 4 the chest. Each
+		place keeps its gun while it is carried, so a gun is always found where
+		it was; a new gun takes the first free place, the latest in the weapon
+		order first (the heaviest over the other shoulder). A gun drawn from a
+		place goes back there, and never becomes the hip's or the shoulder's.
+	*/
+	PClassActor* gPlacePin[5];	// [2..4]
+	bool PinnedToPlace(PClassActor* c)
+	{
+		if (!vr_phys_body_slots || !c) return false;
+		for (int p = 2; p <= 4; ++p) if (gPlacePin[p] == c) return true;
+		return false;
+	}
+
 	// 1 the hip, 2 the shoulder, 0 never holstered.
 	int HolsterKind(AActor* w)
 	{
@@ -686,7 +704,7 @@ namespace
 	{
 		if (!pl || !pl->mo) return nullptr;
 		if (AActor* held = Unpowered(pl->ReadyWeapon))
-			if (HolsterKind(held) == kind) gHolsterLast[kind] = held->GetClass();
+			if (HolsterKind(held) == kind && !PinnedToPlace(held->GetClass())) gHolsterLast[kind] = held->GetClass();
 		if (gHolsterLast[kind])
 		{
 			AActor* inv = pl->mo->FindInventory(gHolsterLast[kind]);
@@ -699,9 +717,43 @@ namespace
 			{
 				PClassActor* cls = pl->weapons.GetWeapon(slot, j);
 				AActor* inv = cls ? pl->mo->FindInventory(cls) : nullptr;
-				if (Usable(inv) && HolsterKind(inv) == kind) return inv;
+				if (Usable(inv) && HolsterKind(inv) == kind && !PinnedToPlace(cls)) return inv;
 			}
 		}
+		return nullptr;
+	}
+
+	// The places' guns, brought up to date: a place lets go of a gun no
+	// longer carried (or now the hip's or the shoulder's), then every usable
+	// gun on no place yet takes the first free one.
+	void UpdatePlaces(player_t* pl)
+	{
+		if (!vr_phys_body_slots || !pl || !pl->mo) { for (auto& c : gPlacePin) c = nullptr; return; }
+		for (int p = 2; p <= 4; ++p)
+			if (gPlacePin[p] && (!pl->mo->FindInventory(gPlacePin[p]) || gPlacePin[p] == gHolsterLast[1] || gPlacePin[p] == gHolsterLast[2]))
+				gPlacePin[p] = nullptr;
+		AActor* hip = HolsterGun(pl, 1);
+		AActor* shoulder = HolsterGun(pl, 2);
+		static const int order[3] = { 2, 4, 3 };	// the other shoulder, the chest, the other hip
+		for (int k = NUM_WEAPON_SLOTS; k >= 1; --k)
+		{
+			const int slot = k % NUM_WEAPON_SLOTS;
+			for (int j = pl->weapons.SlotSize(slot) - 1; j >= 0; --j)
+			{
+				PClassActor* cls = pl->weapons.GetWeapon(slot, j);
+				AActor* inv = cls ? pl->mo->FindInventory(cls) : nullptr;
+				if (!Usable(inv) || HolsterKind(inv) == 0 || inv == hip || inv == shoulder || PinnedToPlace(cls)) continue;
+				for (int p : order)
+					if (!gPlacePin[p]) { gPlacePin[p] = cls; break; }
+			}
+		}
+	}
+
+	// The gun at holster i (0 the hip, 1 the shoulder, 2-4 the places).
+	AActor* GunAt(player_t* pl, int i)
+	{
+		if (i == 0 || i == 1) return HolsterGun(pl, i + 1);
+		if (i >= 2 && i <= 4 && vr_phys_body_slots && gPlacePin[i] && pl && pl->mo) return pl->mo->FindInventory(gPlacePin[i]);
 		return nullptr;
 	}
 
@@ -732,13 +784,51 @@ const void* DoomVR_ReadyWeaponId()
 // A grip at holster i (0 the hip, 1 the shoulder), from doomvr_headset.cpp:
 // its gun comes out the way the weapon wheel switches; at the holster of the
 // gun in hand, it is put away. False: refused (the holster is empty).
+static const char* const kPlaceNames[DOOMVR_HOLSTERS] = { "hip", "shoulder", "other shoulder", "other hip", "chest", "ammo pouch", "grenade" };
+
+// The off hand's places, only where the game has the action: a reload (the
+// gun in hand has one, or the mod made a "reload" command) and a grenade
+// throw (the mod made "grenadetoss", as Brutal Doom does).
+bool DoomVR_PlaceOpen(int i)
+{
+	if (i < 2) return true;
+	if (!vr_phys_body_slots) return false;
+	if (i <= 4) return true;
+	player_t* pl = &players[consoleplayer];
+	if (i == 5) return C_AliasExists("reload") || (pl->ReadyWeapon && pl->ReadyWeapon->FindState(NAME_Reload));
+	if (i == 6) return C_AliasExists("grenadetoss");
+	return false;
+}
+
+// The off hand let go at the ammo pouch: the reload button comes back up.
+static bool gPouchHeld = false;
+void DoomVR_PlaceRelease(int i)
+{
+	if (i == 5 && gPouchHeld) { AddCommandString("-reload"); gPouchHeld = false; }
+}
+
 bool DoomVR_HolsterDraw(int i)
 {
 	player_t* pl = &players[consoleplayer];
-	const int kind = i + 1;
-	AActor* gun = HolsterGun(pl, kind);
+	if (i < 0 || i >= DOOMVR_HOLSTERS) return false;
+	if (i == 5 || i == 6)
+	{
+		if (!DoomVR_PlaceOpen(i)) return false;
+		if (i == 6) AddCommandString("grenadetoss");
+		else if (C_AliasExists("reload")) AddCommandString("reload");
+		else { AddCommandString("+reload"); gPouchHeld = true; }
+		Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: off hand at the %s - %s\n", kPlaceNames[i], i == 6 ? "grenade thrown" : "reload");
+		return true;
+	}
+	UpdatePlaces(pl);
+	AActor* gun = GunAt(pl, i);
 	AActor* held = Unpowered(pl->ReadyWeapon);
-	const char* where = kind == 1 ? "hip" : "shoulder";
+	const char* where = kPlaceNames[i];
+	if (gun && i >= 2 && !Usable(gun))
+	{
+		Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: %s at the %s has no ammo\n", gun->GetClass()->TypeName.GetChars(), where);
+		return false;
+	}
 	if (gun && held == gun)
 	{
 		AActor* to = PutAwayTo(pl);
@@ -1466,6 +1556,7 @@ void HWDrawInfo::DrawVRWrist(FRenderState& state)
 	vr_phys_holster_card). Only with holsters on, never in a menu.
 */
 CVAR(Bool, vr_phys_holster_card, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)	// the first-time card is still to show
+CVAR(Bool, vr_phys_body_card, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)	// the same, for the places on the body
 
 namespace
 {
@@ -1485,12 +1576,18 @@ void HWDrawInfo::DrawVRHolsters(FRenderState& state)
 	player_t* pl = camera ? camera->player : nullptr;
 	if (!pl || !pl->mo || (pl->cheats & CF_CHASECAM) || pl->playerstate != PST_LIVE || camera != pl->mo) return;
 
-	float marks[2][16];
-	double dist[2];
-	bool ready[2];
-	for (int i = 0; i < 2; ++i)
-		if (!DoomVR_HolsterMarker(i, marks[i], dist[i], ready[i])) return;
-	AActor* guns[2] = { HolsterGun(pl, 1), HolsterGun(pl, 2) };
+	float marks[DOOMVR_HOLSTERS][16];
+	double dist[DOOMVR_HOLSTERS];
+	bool ready[DOOMVR_HOLSTERS], open[DOOMVR_HOLSTERS];
+	for (int i = 0; i < DOOMVR_HOLSTERS; ++i)
+	{
+		dist[i] = 1e9; ready[i] = false;
+		open[i] = DoomVR_PlaceOpen(i) && DoomVR_HolsterMarker(i, marks[i], dist[i], ready[i]);
+		if (i < 2 && !open[i]) return;	// holsters not in use this frame
+	}
+	UpdatePlaces(pl);
+	AActor* guns[DOOMVR_HOLSTERS] = {};
+	for (int i = 0; i <= 4; ++i) guns[i] = GunAt(pl, i);
 	AActor* held = Unpowered(pl->ReadyWeapon);
 
 	if (vr_phys_holster_card && gamestate == GS_LEVEL)
@@ -1500,15 +1597,23 @@ void HWDrawInfo::DrawVRHolsters(FRenderState& state)
 			? FStringf("Your %s is on your hip. Your %s is over your shoulder.\nReach there and squeeze grip. Squeeze there again to put it back.", guns[0]->GetTag(), guns[1]->GetTag()).GetChars()
 			: "Holsters: your one-handed gun is on your hip, your two-handed gun\nover your shoulder. Reach there and squeeze grip.");
 	}
+	else if (vr_phys_body_card && vr_phys_body_slots && gamestate == GS_LEVEL && (guns[2] || guns[3] || guns[4]))
+	{
+		vr_phys_body_card = false;
+		C_MidPrint(nullptr, "Your other guns ride on your body too: over your other shoulder,\non your other hip and across your chest. Reach near one to see it.");
+	}
 
 	// The guns on the body, lit as where the player stands; glowing in reach.
 	FColormap cm;
 	cm.Clear();
 	const int light = pl->mo->Sector ? pl->mo->Sector->lightlevel : 192;
-	for (int i = 0; i < 2; ++i)
+	for (int i = 0; i <= 4; ++i)
 	{
 		AActor* gun = guns[i];
-		if (!gun || gun == held) continue;
+		if (!open[i] || !gun || gun == held) continue;
+		// The places' guns show only as the gun hand comes near (the hip's
+		// and the shoulder's are always worn).
+		if (i >= 2 && dist[i] > 0.25) continue;
 		FState* readyState = gun->FindState(NAME_Ready);
 		FSpriteModelFrame* smf = readyState ? FindModelFrame(gun, readyState->sprite, readyState->Frame, false) : nullptr;
 		if (!smf || !DoomVR_SetHolsterModel(i)) continue;
@@ -1532,8 +1637,9 @@ void HWDrawInfo::DrawVRHolsters(FRenderState& state)
 
 	// The rings and the labels.
 	bool begun = false;
-	for (int i = 0; i < 2; ++i)
+	for (int i = 0; i < DOOMVR_HOLSTERS; ++i)
 	{
+		if (!open[i]) continue;
 		const float near = 0.35f;
 		const float alpha = dist[i] <= 0.0 ? 1.f : std::clamp(float((near - dist[i]) / near) * 1.4f, 0.f, 1.f);
 		if (alpha <= 0.02f) continue;
@@ -1570,7 +1676,7 @@ void HWDrawInfo::DrawVRHolsters(FRenderState& state)
 		state.Draw(DT_TriangleStrip, v.second, 2 * (seg + 1));
 
 		// The label above the ring: the game's own small font, 2 cm tall.
-		const FString label = HolsterLabel(guns[i]);
+		const FString label = i == 5 ? FString("AMMO") : i == 6 ? FString("GRENADE") : HolsterLabel(guns[i]);
 		const float k = 0.020f / std::max(1, SmallFont->GetHeight());
 		float width = 0;
 		for (const char* c = label.GetChars(); *c; ++c) { int w = 0; SmallFont->GetChar((unsigned char)*c, CR_UNTRANSLATED, &w); width += w * k; }
@@ -1875,4 +1981,5 @@ void DoomVR_HandsForgetGame()
 	gDrawnHands[0].valid = gDrawnHands[1].valid = false;
 	gWheelGuns.Clear();
 	for (auto& g : gHolsterLast) g = nullptr;
+	for (auto& g : gPlacePin) g = nullptr;
 }

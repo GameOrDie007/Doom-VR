@@ -68,10 +68,6 @@ param(
     # voxel gore, the upscaled textures): asked about and waited for, the
     # other one-click mods only listed. "Get the Modern VR look.cmd" runs this.
     [switch]$LookOnly,
-    # Doom VR.cmd asks this at every start: has the player put a game's WADs in
-    # by hand since the last look? Nothing new and it says nothing and stops;
-    # something new and it adds it with no questions and no downloads.
-    [switch]$PickUp,
     # Where the mirrored mods come from, in place of Doom VR's own "mods"
     # release: a test build points this at a local copy (file:///...).
     [string]$Mirror = "",
@@ -107,13 +103,13 @@ function Say([string]$line) {
     $at = "[{0:00}:{1:00}] " -f [math]::Floor($setupClock.Elapsed.TotalMinutes), $setupClock.Elapsed.Seconds
     try { [System.IO.File]::AppendAllText($logPath, $at + $line + "`r`n") } catch { }
 }
-if (-not $PickUp) { try { [System.IO.File]::WriteAllText($logPath, "") } catch { } }
+try { [System.IO.File]::WriteAllText($logPath, "") } catch { }
 trap {
     Say ("SETUP STOPPED: " + $_.Exception.Message)
     Say ("  at " + $_.InvocationInfo.PositionMessage.Split("`n")[0])
     break
 }
-if (-not $PickUp) { Say ("Doom VR setup started " + (Get-Date -Format "yyyy-MM-dd HH:mm:ss") + " from " + $PSScriptRoot) }
+Say ("Doom VR setup started " + (Get-Date -Format "yyyy-MM-dd HH:mm:ss") + " from " + $PSScriptRoot)
 
 # ProviderPath, not Path: run from a network folder, .Path is
 # "Microsoft.PowerShell.Core\FileSystem::\\server\...", which .NET cannot write to.
@@ -272,6 +268,11 @@ $catalogue = @(
     @{ name = "lunatic.wad";      kind = "idgames"; file = "lunatic.zip";    unzip = @("*.wad"); what = "Lunatic" },
     @{ name = "wos.wad";          kind = "idgames"; file = "wos.zip";        unzip = @("*.wad"); what = "Whispers of Satan" },
     @{ name = "dtwid.wad";        kind = "idgames"; file = "dtwid.zip";      unzip = @("*.wad"); what = "Doom the Way id Did (needs Doom)" },
+    # MyHouse (Steve "Veddge" Nelson, 2023, CC BY 4.0), from the author's own
+    # Google Drive link in the Doomworld post. Not mirrored: the author's text
+    # asks that it not be passed around. A Drive that will not hand it over
+    # falls back to that post, as a one-click download.
+    @{ name = "myhouse.pk3"; kind = "url"; url = "https://drive.usercontent.google.com/download?id=1jPaghNQ39MOVS7qRAqXUUoja5GyLY4mO&export=download&confirm=t"; match = "myhouse*.pk3"; page = "https://www.doomworld.com/forum/topic/134292-myhousewad/"; what = "MyHouse (Steve Nelson)" },
 
     # --- gameplay overhauls ----------------------------------------------------
     @{ name = "Beautiful_Doom_716.pk3"; kind = "url"; url = "https://github.com/jekyllgrim/Beautiful-Doom/releases/download/7.1.6/Beautiful_Doom_716.pk3"; what = "Beautiful Doom - vanilla made gorgeous" },
@@ -325,6 +326,7 @@ $onDoom2 = @(
     @{ name = "Vanguard";                     files = @("mods\vanguard.wad") },
     @{ name = "Lunatic";                      files = @("mods\lunatic.wad") },
     @{ name = "Whispers of Satan";            files = @("mods\wos.wad") },
+    @{ name = "MyHouse";                      files = @("mods\myhouse.pk3") },
     @{ name = "Hell on Earth Starter Pack";   files = @("mods\hellonearthstarterpack.wad") },
     @{ name = "Brutal Doom II";               files = @("mods\brutalv21.pk3") },
     @{ name = "Project Brutality";            files = @("mods\PB-0_3_1-alpha.pk3") },
@@ -378,29 +380,6 @@ foreach ($g in $games) {
 $wantedWads["doom64.wad"] = $true
 
 $wadsDir = if ($LinkWadsCheck) { $LinkWadsCheck } elseif ($LinkWads) { Join-Path $Install $LinkWads } else { Join-Path $Install "wads" }
-
-# The games wads\ held when setup last finished: one written since, or one in a
-# place a player would put it by hand, is new.
-$seenFile = Join-Path $Install "setup\games-seen.txt"
-if ($PickUp) {
-    $seen = @(); if (Test-Path -LiteralPath $seenFile) { $seen = @(Get-Content -LiteralPath $seenFile) }
-    $new = @{}
-    foreach ($d in (Split-Path -Parent $Install), $Install, (Join-Path $Install "My WADs")) {
-        foreach ($f in @(Get-ChildItem -LiteralPath $d -File -ErrorAction SilentlyContinue)) {
-            $n = $f.Name.ToLower()
-            if ($wantedWads.ContainsKey($n) -and -not (Test-Path -LiteralPath (Join-Path $wadsDir $n))) { $new[$n] = $true }
-        }
-    }
-    foreach ($f in @(Get-ChildItem -LiteralPath $wadsDir -File -ErrorAction SilentlyContinue)) {
-        $n = $f.Name.ToLower()
-        if ($wantedWads.ContainsKey($n) -and $seen -notcontains $n) { $new[$n] = $true }
-    }
-    if ($new.Count -eq 0) { exit 0 }
-    try { [System.IO.File]::WriteAllText($logPath, "") } catch { }
-    Say ("Found " + (@($new.Keys | Sort-Object) -join ", ") + ": adding to Doom VR, one moment...")
-    $Unattended = $true
-    $NoDownload = $true
-}
 $kexDir = Join-Path $Install "kex"
 $modsDir = Join-Path $Install "mods"
 $doomceDir = Join-Path $Install "doomce"
@@ -770,7 +749,9 @@ if (-not $LinkWads) {
             $url = $idgamesMirrors[0] + "/" + $rel
         }
         # This run's own name: two setups at once must not share a file.
-        $tmp = Join-Path $env:TEMP ("doomvr_{0}_{1}" -f $PID, [IO.Path]::GetFileName($url))
+        # From the link's path alone: a link like Google Drive's ends in ?id=...,
+        # and a ? cannot be in a file name.
+        $tmp = Join-Path $env:TEMP ("doomvr_{0}_{1}" -f $PID, [IO.Path]::GetFileName(([Uri]$url).AbsolutePath))
         $fetchN++
         Say ("Downloading {0} of {1}: {2}..." -f $fetchN, $toFetch, ($p.what -replace ' - .*$', ''))
         $ok = $false
@@ -1393,6 +1374,8 @@ function ModernFor($g) {
             elseif (@($g.files) -match 'brutalv21\.pk3') { "mods\doomvr-weapons-brutaldoom-b.pk3" }
             elseif (@($g.files) -match 'PB-0_3_1-alpha\.pk3') { "mods\doomvr-weapons-projectbrutality-b.pk3" }
             elseif (@($g.files) -match 'meatgrinderV2C\.pk3') { "mods\doomvr-weapons-meatgrinder-b.pk3" }
+            # MyHouse's Smooth guns replace Doom's: our Doom guns reach them the same way.
+            elseif (@($g.files) -match 'myhouse\.pk3') { "mods\doomvr-weapons-myhouse-b.pk3" }
             elseif (@($g.files) -match 'bd64gamev2\.pk3') { "mods\doomvr-weapons-brutaldoom64-b.pk3" }
             else { $null }
     if ($onto) {
@@ -1665,10 +1648,4 @@ if ($missing.Count -gt 0) {
     Say "  Have them somewhere else - an older Doom VR folder, or another Doom port's? Drop that folder onto Setup.bat."
 }
 if ($start) { Say "Ready: $start starts first; Switch Game has the rest." } else { Say "No games found yet - nothing to start." }
-if (-not $LinkWads) {
-    try {
-        $names = @(Get-ChildItem -LiteralPath $wadsDir -File -ErrorAction SilentlyContinue | ForEach-Object { $_.Name.ToLower() } | Where-Object { $wantedWads.ContainsKey($_) })
-        [System.IO.File]::WriteAllLines($seenFile, [string[]]$names)
-    } catch { Say ("Could not note the games found: " + $_.Exception.Message) }
-}
 Say "Setup finished."

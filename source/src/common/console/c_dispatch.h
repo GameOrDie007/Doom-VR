@@ -81,6 +81,7 @@ void C_ArchiveAliases (FConfigFile *f);
 
 void C_SetAlias (const char *name, const char *cmd);
 void C_ClearAliases ();
+bool C_AliasExists (const char *name);	// DoomVR
 
 // build a single string out of multiple strings
 FString BuildString (int argc, FString *argv);

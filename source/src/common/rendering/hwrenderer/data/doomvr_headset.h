@@ -210,11 +210,19 @@ bool DoomVR_HandsMatrix(int hand, float out[16], DoomVR_HandInput& in, int mode 
 // The two holsters (0 the hip, 1 the shoulder): a ring's place, the gun hand's
 // distance from it (0 inside) and whether a grip now would draw; and the next
 // model drawn put in holster i (-1 back in the hand).
+// Holsters 0-1 and, with More places on the body (vr_phys_body_slots), 2 the
+// other shoulder, 3 the other hip, 4 the chest (the gun hand), 5 the ammo pouch
+// and 6 the grenade (the other hand).
+#define DOOMVR_HOLSTERS 7
 bool DoomVR_HolsterMarker(int i, float out[16], double& handDist, bool& ready);
 bool DoomVR_SetHolsterModel(int i);
 // doomvr_hands.cpp: a grip at holster i - the draw, the put-away, or false
 // when it is refused (empty, no ammo).
 bool DoomVR_HolsterDraw(int i);
+// doomvr_hands.cpp: whether place i is there now (the game has its action),
+// and a hand let go of it.
+bool DoomVR_PlaceOpen(int i);
+void DoomVR_PlaceRelease(int i);
 // doomvr_hands.cpp: the weapon in the player's hand now, only to see it change.
 const void* DoomVR_ReadyWeaponId();
 // The weapon hand's weapon just shot (or struck, melee): the recoil and punch.

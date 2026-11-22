@@ -45,6 +45,7 @@ UAC Ultra|Maps by 40oz and Super Jamie, set in a vast high-tech lab complex deep
 Valiant|Fast and tough maps by skillsaw, with reworked weapons and new monsters.
 Vanguard|Fast, action-packed maps by skillsaw, the author of Valiant.
 Whispers of Satan|Thirty levels by Paul Corfiatis and Kristian Aro, a Cacoward winner from 2009.
+MyHouse|Steve Nelson's 2023 tribute map of a childhood friend's house. Best played knowing nothing about it.
 Beautiful Doom|Doom as you know it, with smoother animation, better effects and more polished weapons.
 Brutal Doom|Sergeant Mark IV's famous overhaul of Doom: heavy gore, fatalities, new moves and harder fights.
 Brutal Doom II|Brutal Doom's gore, fatalities and harder fights, played on Doom II's maps.

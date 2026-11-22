@@ -201,6 +201,10 @@ CVAR(Bool, vr_weapon_bob, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // in it.
 CVAR(Bool, vr_phys_holsters, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_phys_holster_lift, 0.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)	// m, seated reach: lifts both holsters, up to 0.2
+// More places on the body: the other guns over the other shoulder, on the
+// other hip and across the chest, an ammo pouch and grenades for the other
+// hand where the game has them. Off until worn (Features 23).
+CVAR(Bool, vr_phys_body_slots, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_weapon_wheel, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)		// hold the turning stick's click
 // Hold the right grip and flick the right stick: up the next weapon, down the
 // one before (the flick's own items wait while the grip is held, and the
@@ -223,6 +227,13 @@ CVAR(Float, vr_model_pitch, -32.3f, 0)
 // A test hook: the screen blend drawn over the 3D view, as in a headset, on
 // the flat game too - so the path can be seen on a monitor.
 CVAR(Bool, vr_debug_blend_in_scene, false, 0)
+// An Index controller has no menu button (its system button is SteamVR's), and
+// on SteamVR a Quest's menu button can open SteamVR's own overlay instead (a
+// Quest 3 player, Flat2VR, 21 Nov 2026), so the first time either is seen in a
+// level, a card says how to open the game's menu.
+CVAR(Bool, vr_index_menu_card, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+class FFont;
+void C_MidPrint(FFont* font, const char* message, bool bold);	// g_statusbar
 
 // The weapon's size in the hand: metres per sprite unit. A pistol sprite is
 // about 57 units wide, so 0.003 holds it about 17 cm across.
@@ -1525,26 +1536,43 @@ namespace
 		arriving, so an arm resting at the side does not draw; 2 cm of
 		hysteresis at a zone's edge. The Leftorium puts them on the other side.
 	*/
+	/*
+		With More places on the body (vr_phys_body_slots), five more zones, the
+		same rules: for the gun hand the other shoulder (on top of it, as the
+		shoulder holster), the other hip (a cross draw) and the chest (across
+		it, never in front of the face); for the other hand an ammo pouch on
+		its hip (the game's reload, where the gun has one) and a grenade on
+		its side of the chest (where the mod has a grenade throw). Each zone
+		answers its own hand only.
+	*/
 	struct HolsterZone
 	{
 		const char* name;
+		int hand;	// 0 the gun hand, 1 the other hand
 		double outFrom, outTo, downFrom, downTo, ahead, behind;	// m from the neck
 		double spotOut, spotDown, spotBehind;	// where its ring is drawn
 	};
-	const HolsterZone kHolsterZones[] = {
-		{ "hip",      0.08, 0.60,  0.40, 0.95, 0.35, 0.35,  0.22, 0.50, 0.00 },
-		{ "shoulder", 0.10, 0.45, -0.20, 0.25, 0.15, 0.20,  0.20, 0.02, 0.03 },
+	const HolsterZone kHolsterZones[DOOMVR_HOLSTERS] = {
+		{ "hip",            0,  0.08,  0.60,  0.40, 0.95, 0.35, 0.35,   0.22, 0.50,  0.00 },
+		{ "shoulder",       0,  0.10,  0.45, -0.20, 0.25, 0.15, 0.20,   0.20, 0.02,  0.03 },
+		{ "other shoulder", 0, -0.45, -0.10, -0.20, 0.25, 0.15, 0.20,  -0.20, 0.02,  0.03 },
+		{ "other hip",      0, -0.60, -0.08,  0.40, 0.95, 0.35, 0.35,  -0.22, 0.50, -0.04 },
+		{ "chest",          0, -0.10,  0.08,  0.15, 0.40, 0.25, 0.05,  -0.01, 0.28, -0.12 },
+		{ "ammo pouch",     1, -0.60, -0.08,  0.40, 0.95, 0.35, 0.35,  -0.22, 0.50,  0.04 },
+		{ "grenade",        1, -0.25,  0.05,  0.15, 0.40, 0.25, 0.05,  -0.12, 0.28, -0.12 },
 	};
-	constexpr int kHolsterCount = 2;
+	constexpr int kHolsterCount = DOOMVR_HOLSTERS;
 	constexpr double kNeckDown = 0.10, kNeckBack = 0.08;	// the neck from the eyes, in the head's frame
 	constexpr double kBodyDeadZone = 45.0;	// degrees the head turns before the body follows
 	bool gTwoHandGrip = false;	// the other hand holds the gun's front (and the frame it lets go)
 	bool gMouthGrip = false, gMouthGripWas = false;	// the other hand's grip used an item at the mouth
 	double gBodyYaw = 0;
-	bool gBodyYawSet = false, gHolsterHeld = false, gHolsterGripWas = false;
-	int gHolsterInside = -1, gHolstersLogged = 0;
-	double gHolsterEnteredMs = 0;	// when the gun hand arrived in gHolsterInside
-	bool gHolsterRearm = true;		// holsters were away: a hand found in one is resting there
+	bool gBodyYawSet = false;
+	// Per hand: [0] the gun hand, [1] the other hand.
+	bool gHolsterHeld[2] = {}, gHolsterGripWas[2] = {};
+	int gHolsterInside[2] = { -1, -1 }, gHolsterGrabbed[2] = { -1, -1 }, gHolstersLogged = 0;
+	double gHolsterEnteredMs[2] = {};	// when the hand arrived in gHolsterInside
+	bool gHolsterRearm[2] = { true, true };	// holsters were away: a hand found in one is resting there
 	constexpr double kHolsterReachMs = 1500;
 	// This frame's body, for the markers and the holstered guns: the neck in
 	// the room, the body's yaw, the side the gun hand is on, and how far the
@@ -1571,27 +1599,44 @@ namespace
 
 	// Returns true while a holster grab holds the gun hand's grip, and on the
 	// frame it is let go - so a quick grab is not also the grip's tap.
-	bool Holsters(const pcvrxr::HandState& r, bool gripDown)
+	// Fills grab[h] while a holster grab holds that hand's grip, and on the
+	// frame it is let go - so a quick grab is not also the grip's tap.
+	void Holsters(const pcvrxr::HandState& r, const pcvrxr::HandState& l, bool rDown, bool lDown, bool grab[2])
 	{
-		const bool pressed = gripDown && !gHolsterGripWas;
-		gHolsterGripWas = gripDown;
-		const bool wasHeld = gHolsterHeld;
-		if (!gripDown) gHolsterHeld = false;
+		const pcvrxr::HandState* hands[2] = { &r, &l };
+		const bool downs[2] = { rDown, lDown };
+		bool pressed[2], wasHeld[2];
+		for (int h = 0; h < 2; ++h)
+		{
+			pressed[h] = downs[h] && !gHolsterGripWas[h];
+			gHolsterGripWas[h] = downs[h];
+			wasHeld[h] = gHolsterHeld[h];
+			if (!downs[h])
+			{
+				if (gHolsterGrabbed[h] >= 0) DoomVR_PlaceRelease(gHolsterGrabbed[h]);
+				gHolsterGrabbed[h] = -1;
+				gHolsterHeld[h] = false;
+			}
+		}
 		const bool can = vr_phys_holsters && r.active && gamestate == GS_LEVEL && menuactive == MENU_Off
 		              && ConsoleState != c_down && ConsoleState != c_falling && DoomVR_PlayerAlive() && !paused;
 		gHolstersValid = can;
-		// Away (a menu, the console, a pause, a new level, death), the hand is
+		// Away (a menu, the console, a pause, a new level, death), the hands are
 		// not followed; on coming back, a hand already in a holster counts as
 		// RESTING there, not arriving.
-		if (!can) { gHolsterInside = -1; gHolsterRearm = true; return gHolsterHeld || wasHeld; }
+		if (!can)
+		{
+			for (int h = 0; h < 2; ++h) { gHolsterInside[h] = -1; gHolsterRearm[h] = true; grab[h] = gHolsterHeld[h] || wasHeld[h]; }
+			return;
+		}
 
 		const pcvrxr::Pose& head = gSession->Head();
 		double hy, hp, hr;
 		ToYawPitchRoll(head.orientation, hy, hp, hr);
 		if (!gBodyYawSet) { gBodyYaw = hy; gBodyYawSet = true; }
 		// The body turns once the head is past the dead zone, at once; never
-		// while the gun hand is in a holster (it would move under the hand).
-		if (gHolsterInside < 0)
+		// while a hand is in a holster (it would move under the hand).
+		if (gHolsterInside[0] < 0 && gHolsterInside[1] < 0)
 		{
 			double lag = hy - gBodyYaw;
 			while (lag > 3.14159265358979) lag -= 2 * 3.14159265358979;
@@ -1602,58 +1647,66 @@ namespace
 		}
 		const pcvrxr::Vec3 neckOff = Rotate(head.orientation, 0, -kNeckDown, kNeckBack);
 		gNeck = { head.position.x + neckOff.x, head.position.y + neckOff.y, head.position.z + neckOff.z };
-
-		// The gun hand from the neck, on the body's axes: out to the gun
-		// side, down, behind.
 		double rx, rz, fx, fz;
 		BodyAxes(rx, rz, fx, fz);
-		const double dx = r.grip.position.x - gNeck.x, dy = r.grip.position.y - gNeck.y, dz = r.grip.position.z - gNeck.z;
-		const double out = (Leftorium() ? -1.0 : 1.0) * (dx * rx + dz * rz), down = -dy, behind = -(dx * fx + dz * fz);
 		const double lift = std::clamp(double(vr_phys_holster_lift), 0.0, 0.20);
+		for (int i = 0; i < kHolsterCount; ++i) gHolsterDist[i] = 1e9;
 
-		int inside = -1;
-		for (int i = 0; i < kHolsterCount; ++i)
+		for (int h = 0; h < 2; ++h)
 		{
-			const HolsterZone& z = kHolsterZones[i];
-			// 2 cm more for the holster the hand is already in, so an edge does
-			// not flicker, tick and restart the reach time.
-			const double m = i == gHolsterInside ? 0.02 : 0.0;
-			const bool in = out >= z.outFrom - m && out <= z.outTo + m &&
-			                down >= z.downFrom - lift - m && down <= z.downTo - lift + m &&
-			                behind >= -z.ahead - m && behind <= z.behind + m;
-			const pcvrxr::Vec3 spot = BodyPoint(z.spotOut, z.spotDown - lift, z.spotBehind);
-			const double ex = r.grip.position.x - spot.x, ey = r.grip.position.y - spot.y, ez = r.grip.position.z - spot.z;
-			gHolsterDist[i] = in ? 0.0 : sqrt(ex * ex + ey * ey + ez * ez);
-			if (in && inside < 0) inside = i;
+			const pcvrxr::HandState& hand = *hands[h];
+			int inside = -1;
+			// The hand from the neck, on the body's axes: out to the gun
+			// side, down, behind.
+			const double dx = hand.grip.position.x - gNeck.x, dy = hand.grip.position.y - gNeck.y, dz = hand.grip.position.z - gNeck.z;
+			const double out = (Leftorium() ? -1.0 : 1.0) * (dx * rx + dz * rz), down = -dy, behind = -(dx * fx + dz * fz);
+			if (hand.active)
+				for (int i = 0; i < kHolsterCount; ++i)
+				{
+					const HolsterZone& z = kHolsterZones[i];
+					if (z.hand != h || !DoomVR_PlaceOpen(i)) continue;
+					// 2 cm more for the holster the hand is already in, so an edge does
+					// not flicker, tick and restart the reach time.
+					const double m = i == gHolsterInside[h] ? 0.02 : 0.0;
+					const bool in = out >= z.outFrom - m && out <= z.outTo + m &&
+					                down >= z.downFrom - lift - m && down <= z.downTo - lift + m &&
+					                behind >= -z.ahead - m && behind <= z.behind + m;
+					const pcvrxr::Vec3 spot = BodyPoint(z.spotOut, z.spotDown - lift, z.spotBehind);
+					const double ex = hand.grip.position.x - spot.x, ey = hand.grip.position.y - spot.y, ez = hand.grip.position.z - spot.z;
+					gHolsterDist[i] = in ? 0.0 : sqrt(ex * ex + ey * ey + ez * ez);
+					if (in && inside < 0) inside = i;
+				}
+			const int pulseHand = h == 0 ? 2 : 1;
+			if (gHolsterRearm[h])
+			{
+				gHolsterRearm[h] = false;
+				gHolsterInside[h] = inside;
+				gHolsterEnteredMs[h] = -1e9;
+			}
+			if (inside >= 0 && inside != gHolsterInside[h]) { DoomVR_Pulse(pulseHand, 0.02f, 0.3f, "holster in reach"); gHolsterEnteredMs[h] = NowMs(); }
+			gHolsterInside[h] = inside;
+			// Every grip on the body, so the zones can be fitted from a log.
+			if (pressed[h] && gHolstersLogged < 40 && down > 0.0)
+			{
+				++gHolstersLogged;
+				Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: %s grip %.2f m out, %.2f down, %.2f %s from the neck%s%s\n", h == 0 ? "gun-hand" : "other-hand",
+				       out, down, fabs(behind), behind >= 0 ? "behind" : "ahead", inside >= 0 ? " - in the " : "", inside >= 0 ? kHolsterZones[inside].name : "");
+			}
+			if (pressed[h] && inside >= 0 && NowMs() - gHolsterEnteredMs[h] > kHolsterReachMs && gHolstersLogged < 40)
+			{
+				++gHolstersLogged;
+				Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: grip at the %s, but the hand %s - not a draw\n", kHolsterZones[inside].name,
+				       gHolsterEnteredMs[h] < 0 ? "was already there when play resumed" : "had rested there over 1.5 s");
+			}
+			if (pressed[h] && inside >= 0 && NowMs() - gHolsterEnteredMs[h] <= kHolsterReachMs)
+			{
+				gHolsterHeld[h] = true;
+				gHolsterGrabbed[h] = inside;
+				if (DoomVR_HolsterDraw(inside)) DoomVR_Pulse(pulseHand, 0.05f, 0.6f, "holster draw");
+				else { DoomVR_Pulse(pulseHand, 0.03f, 0.25f, "holster refused"); DoomVR_Pulse(pulseHand, 0.03f, 0.25f, "holster refused"); }
+			}
+			grab[h] = gHolsterHeld[h] || wasHeld[h];
 		}
-		if (gHolsterRearm)
-		{
-			gHolsterRearm = false;
-			gHolsterInside = inside;
-			gHolsterEnteredMs = -1e9;
-		}
-		if (inside >= 0 && inside != gHolsterInside) { DoomVR_Pulse(2, 0.02f, 0.3f, "holster in reach"); gHolsterEnteredMs = NowMs(); }
-		gHolsterInside = inside;
-		// Every grip on the body, so the zones can be fitted from a log.
-		if (pressed && gHolstersLogged < 40 && down > 0.0)
-		{
-			++gHolstersLogged;
-			Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: gun-hand grip %.2f m out, %.2f down, %.2f %s from the neck%s%s\n", out, down, fabs(behind),
-			       behind >= 0 ? "behind" : "ahead", inside >= 0 ? " - in the " : "", inside >= 0 ? kHolsterZones[inside].name : "");
-		}
-		if (pressed && inside >= 0 && NowMs() - gHolsterEnteredMs > kHolsterReachMs && gHolstersLogged < 40)
-		{
-			++gHolstersLogged;
-			Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: grip at the %s holster, but the hand %s - not a draw\n", kHolsterZones[inside].name,
-			       gHolsterEnteredMs < 0 ? "was already there when play resumed" : "had rested there over 1.5 s");
-		}
-		if (pressed && inside >= 0 && NowMs() - gHolsterEnteredMs <= kHolsterReachMs)
-		{
-			gHolsterHeld = true;
-			if (DoomVR_HolsterDraw(inside)) DoomVR_Pulse(2, 0.05f, 0.6f, "holster draw");
-			else { DoomVR_Pulse(2, 0.03f, 0.25f, "holster refused"); DoomVR_Pulse(2, 0.03f, 0.25f, "holster refused"); }
-		}
-		return gHolsterHeld || wasHeld;
 	}
 
 	void ReadControllers()
@@ -1712,7 +1765,9 @@ namespace
 		// overlay). A lone grip waits kGripChordWaitMs (0.12 s) for
 		// the other before it reaches the game; let go sooner, it arrives as
 		// a tap. While the chord is held neither grip does anything else.
-		const bool holsterGrab = Holsters(r, r.active && r.squeezeClick.down);
+		bool holsterGrabs[2] = {};
+		Holsters(r, l, r.active && r.squeezeClick.down, l.active && l.squeezeClick.down, holsterGrabs);
+		const bool holsterGrab = holsterGrabs[0], offHolsterGrab = holsterGrabs[1];
 		{
 			/*
 				Physical play, items to the mouth: in a
@@ -1778,8 +1833,8 @@ namespace
 			if (gGripFlicked) { gGripTap[1] = 0; eff[1] = false; }
 			if (!down[1]) gGripFlicked = false;
 			if (holsterGrab) gGripTap[1] = 0;	// a holster grab is never also a tap
-			if (gTwoHandGrip || gMouthGrip) gGripTap[0] = 0;	// nor is a hand on the gun's front, or at the mouth
-			l.squeezeClick.down = eff[0] && !gTwoHandGrip && !gMouthGrip;
+			if (gTwoHandGrip || gMouthGrip || offHolsterGrab) gGripTap[0] = 0;	// nor is a hand on the gun's front, at the mouth or at a body place
+			l.squeezeClick.down = eff[0] && !gTwoHandGrip && !gMouthGrip && !offHolsterGrab;
 			r.squeezeClick.down = eff[1] && !holsterGrab;
 		}
 		MenuPointer(r);
@@ -1850,6 +1905,24 @@ namespace
 			gTuneLClick = click;
 		}
 		gRunHeld = !paused2D && !tuning && ((click && !gPadLayout) || gRunCmd);
+
+		// Index players, and anyone on SteamVR whose menu button SteamVR keeps:
+		// the menu is the left stick held in (below), and nothing says so.
+		if (vr_index_menu_card && l.active && gamestate == GS_LEVEL && menuactive == MENU_Off && !paused2D)
+		{
+			const char* prof = gSession->InteractionProfile(pcvrxr::Hand::Left);
+			const char* rt = gSession->RuntimeName();
+			if (prof != nullptr && strcmp(prof, "/interaction_profiles/valve/index_controller") == 0)
+			{
+				vr_index_menu_card = false;
+				C_MidPrint(nullptr, "Index controllers have no menu button.\nTo open the menu, hold the left stick in for a second while standing still.", false);
+			}
+			else if (prof != nullptr && rt != nullptr && strstr(rt, "SteamVR") != nullptr)
+			{
+				vr_index_menu_card = false;
+				C_MidPrint(nullptr, "If the menu button opens SteamVR instead of the game's menu,\nhold the left stick in for a second while standing still.", false);
+			}
+		}
 
 		// A held button never acts in the next screen: after a menu opens or
 		// closes, the game's screen changes (a new level, the intermission),
@@ -3186,8 +3259,8 @@ bool DoomVR_HolsterMarker(int i, float out[16], double& handDist, bool& ready)
 {
 	if (!DoomVR_Active() || !gHolstersValid || i < 0 || i >= kHolsterCount) return false;
 	handDist = gHolsterDist[i];
-	ready = i == gHolsterInside && NowMs() - gHolsterEnteredMs <= kHolsterReachMs;
 	const HolsterZone& z = kHolsterZones[i];
+	ready = i == gHolsterInside[z.hand] && NowMs() - gHolsterEnteredMs[z.hand] <= kHolsterReachMs;
 	const double lift = std::clamp(double(vr_phys_holster_lift), 0.0, 0.20);
 	const pcvrxr::Vec3 p = BodyPoint(z.spotOut, z.spotDown - lift, z.spotBehind);
 	const pcvrxr::Pose& eyePose = gSession->GetView(gDrawingEye).pose;
@@ -3215,7 +3288,7 @@ bool DoomVR_HolsterMarker(int i, float out[16], double& handDist, bool& ready)
 */
 bool DoomVR_SetHolsterModel(int i)
 {
-	if (i < 0 || !DoomVR_Active() || !gHolstersValid || i >= kHolsterCount) { gPlacedModelOn = false; return false; }
+	if (i < 0 || !DoomVR_Active() || !gHolstersValid || i > 4) { gPlacedModelOn = false; return false; }
 	const double lift = std::clamp(double(vr_phys_holster_lift), 0.0, 0.20);
 	const double side = Leftorium() ? -1.0 : 1.0;
 	auto axisQ = [](double x, double y, double z, double deg) {
@@ -3228,10 +3301,28 @@ bool DoomVR_SetHolsterModel(int i)
 		gPlacedAt = BodyPoint(0.23, 0.62 - lift, 0.02);
 		gPlacedQ = QuatMul(body, axisQ(1, 0, 0, -90));
 	}
-	else
+	else if (i == 1)
 	{
 		gPlacedAt = BodyPoint(0.10, 0.32 - lift, 0.17);
 		gPlacedQ = QuatMul(QuatMul(QuatMul(body, axisQ(0, 0, 1, side * 20)), axisQ(1, 0, 0, -90)), axisQ(0, 0, 1, 180));
+	}
+	else if (i == 2)
+	{
+		// The other shoulder: the shoulder holster's mirror.
+		gPlacedAt = BodyPoint(-0.10, 0.32 - lift, 0.17);
+		gPlacedQ = QuatMul(QuatMul(QuatMul(body, axisQ(0, 0, 1, -side * 20)), axisQ(1, 0, 0, -90)), axisQ(0, 0, 1, 180));
+	}
+	else if (i == 3)
+	{
+		// The other hip: barrel down, its grip forward for a cross draw.
+		gPlacedAt = BodyPoint(-0.23, 0.62 - lift, 0.0);
+		gPlacedQ = QuatMul(body, axisQ(1, 0, 0, -90));
+	}
+	else
+	{
+		// Across the chest, barrel up toward the other shoulder.
+		gPlacedAt = BodyPoint(0.0, 0.32 - lift, -0.13);
+		gPlacedQ = QuatMul(QuatMul(body, axisQ(0, 0, 1, side * 55)), axisQ(1, 0, 0, -90));
 	}
 	gPlacedModelOn = true;
 	return true;
@@ -3242,11 +3333,13 @@ bool DoomVR_SetHolsterModel(int i)
 CCMD(vr_debug_holsters)
 {
 	if (!gHolstersValid) { Printf("vr_debug_holsters: holsters not in use this frame\n"); return; }
-	const pcvrxr::HandState& r = Hand(Leftorium() ? pcvrxr::Hand::Left : pcvrxr::Hand::Right);
+	const pcvrxr::HandState& gunHand = Hand(Leftorium() ? pcvrxr::Hand::Left : pcvrxr::Hand::Right);
+	const pcvrxr::HandState& offHand = Hand(Leftorium() ? pcvrxr::Hand::Right : pcvrxr::Hand::Left);
 	const double lift = std::clamp(double(vr_phys_holster_lift), 0.0, 0.20);
 	for (int i = 0; i < kHolsterCount; ++i)
 	{
 		const HolsterZone& z = kHolsterZones[i];
+		const pcvrxr::HandState& r = z.hand == 0 ? gunHand : offHand;
 		const pcvrxr::Vec3 p = BodyPoint(z.spotOut, z.spotDown - lift, z.spotBehind);
 		Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: %-8s holster ring at %.3f %.3f %.3f, gun hand at %.3f %.3f %.3f, %s\n", z.name,
 		       p.x, p.y, p.z, r.grip.position.x, r.grip.position.y, r.grip.position.z,
@@ -4288,8 +4381,7 @@ void DoomVR_ForgetGame()
 	WheelClose(false);
 	gTwoHanded = false;
 	gHeldLongGun = false;
-	gHolsterInside = -1;
-	gHolsterRearm = true;
+	for (int h = 0; h < 2; ++h) { gHolsterInside[h] = -1; gHolsterRearm[h] = true; }
 	gToldGame = "";
 	gToldHand = -1;
 	gTomePaused = false;
