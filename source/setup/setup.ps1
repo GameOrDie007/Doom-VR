@@ -1507,6 +1507,22 @@ if ($writtenEntries.Count -gt 0) {
         return ($kind, (IdOf $kind $label), $label, (& $f $has), (& $f $needs), (& $f $clashes), (& $f $warns), $launch.Trim()) -join "`t"
     }
     function FilesArg($files) { return ((@($files | Where-Object { $_ -and (Has $_) }) | ForEach-Object { "-file `"" + (RefOf $_) + "`"" }) -join " ") }
+    # A megawad or gameplay mod whose own guns take the Doom ones' places
+    # (MyHouse's Smooth guns, MeatGrinder, the Brutal family) carries our Doom
+    # guns and its pack naming its weapons, as its own launcher does: its own
+    # weapons keep the "Doom guns" look off a build, so without these a build
+    # showed its flat gun pictures. -modern: a Classic run leaves them out.
+    function GunPacksArg($files) {
+        $guns = "mods\doomvr-weapons-doom-b.pk3"
+        $onto = if (@($files) -match 'myhouse\.pk3') { "mods\doomvr-weapons-myhouse-b.pk3" }
+                elseif (@($files) -match 'meatgrinderV2C\.pk3') { "mods\doomvr-weapons-meatgrinder-b.pk3" }
+                elseif (@($files) -match 'brutalv21\.pk3') { "mods\doomvr-weapons-brutaldoom-b.pk3" }
+                elseif (@($files) -match 'PB-0_3_1-alpha\.pk3') { "mods\doomvr-weapons-projectbrutality-b.pk3" }
+                elseif (@($files) -match 'bd64gamev2\.pk3') { "mods\doomvr-weapons-brutaldoom64-b.pk3" }
+                else { $null }
+        if (-not $onto -or -not (Has $guns) -or -not (Has $onto)) { return "" }
+        return (" -modern `"" + (RefOf $guns) + "`" -modern `"" + (RefOf $onto) + "`"")
+    }
 
     $cat = @("# Build Your Own Game's catalogue. Written by SETUP.bat; running it again rewrites this.",
              "# kind`tid`tlabel`thas`tneeds`tclashes`twarns`targs")
@@ -1527,12 +1543,12 @@ if ($writtenEntries.Count -gt 0) {
     foreach ($m in $mapSets) {
         if (-not (Has $m.files[0])) { continue }
         $tags = @("maps") + (ContentTags @($m.files | Where-Object { Has $_ } | ForEach-Object { PathOf $_ }))
-        $cat += CatLine "maps" $m.label $tags $m.needs "hasmaps" @() (FilesArg $m.files)
+        $cat += CatLine "maps" $m.label $tags $m.needs "hasmaps" @() ((FilesArg $m.files) + (GunPacksArg $m.files))
         $nAdd++
     }
     foreach ($m in @($onDoom2 | Where-Object { $groupOf[$_.name] -eq "Gameplay mods" })) {
         if (-not (Has $m.files[0])) { continue }
-        $cat += CatLine "gameplay" $m.name "gameplay" "doom" @() ("ownmonsters", "ownactors") (FilesArg $m.files)
+        $cat += CatLine "gameplay" $m.name "gameplay" "doom" @() ("ownmonsters", "ownactors") ((FilesArg $m.files) + (GunPacksArg $m.files))
         $nAdd++
     }
     foreach ($a in $addOns) {

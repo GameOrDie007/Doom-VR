@@ -43,6 +43,7 @@
 EXTERN_CVAR(Bool, queryiwad);
 EXTERN_CVAR(String, queryiwad_key);
 EXTERN_CVAR(Bool, disableautoload);
+EXTERN_CVAR(Bool, vr_open_picker);	// DoomVR: doomvr_switchgame.cpp
 EXTERN_CVAR(Bool, autoloadlights);
 EXTERN_CVAR(Bool, autoloadbrightmaps);
 EXTERN_CVAR(Bool, autoloadwidescreen);
@@ -843,6 +844,18 @@ int FIWadManager::IdentifyVersion (std::vector<FileSys::ResourceName>&wadfiles, 
 	bool showlauncher = Args->CheckParm(FArg_showlauncher);
 	bool alwaysshow = (queryiwad && !Args->CheckParm(FArg_iwad) && !foundprio) || showlauncher;
 
+	// DoomVR: players never see the IWAD launcher. Started with no game named
+	// (uzdoom.exe on its own, a tool that runs it bare), it takes Doom II when
+	// it is here, else the first game found, and opens the game picker (Switch
+	// Game) in the headset, as the Doom VR shortcut does.
+	if (!havepicked && (alwaysshow || picks.Size() > 1))
+	{
+		pick = 0;
+		for (unsigned i = 0; i < picks.Size(); ++i)
+			if (stricmp(ExtractFileBase(picks[i].mFullPath.GetChars(), true).GetChars(), "doom2.wad") == 0) { pick = i; break; }
+		if (!Args->CheckParm(FArg_iwad)) vr_open_picker = true;
+		havepicked = true;
+	}
 	if (!havepicked && (alwaysshow || picks.Size() > 1))
 	{
 		TArray<WadStuff> wads;

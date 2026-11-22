@@ -227,6 +227,8 @@ static std::string MyWadScan(const std::string& path, std::vector<std::string>& 
 		if (!strnicmp(full, "DECORATE", 8) || !strnicmp(full, "ZSCRIPT", 7) || !strnicmp(full, "DEHACKED", 8)) tag("ownactors");
 		// A mod Doom VR has its own guns for (FitPack): known by its own script files.
 		if (!stricmp(full, "zscript/system/zeventhandlers.zsc") || !stricmp(full, "zscript/player/zweaponsbase.zsc")) tag("fit:doominfinite");
+		// MyHouse (myhouse.pk3): its own WADs inside, its Smooth guns replace Doom's.
+		if (!stricmp(full, "mirrorvile.wad") || !stricmp(full, "house.wad")) tag("fit:myhouse");
 		if (!strnicmp(full, "TEXTURE1", 8) || !strnicmp(full, "TEXTURE2", 8) || !strnicmp(full, "TEXTURES", 8) || !stricmp(full, "P_START") || !stricmp(full, "PP_START") || !stricmp(full, "TX_START")
 		    || !strnicmp(full, "patches/", 8) || !strnicmp(full, "flats/", 6) || !strnicmp(full, "textures/", 9)) tag("owntextures");
 		if ((slash == nullptr && (!strnicmp(full, "D_", 2) || !stricmp(full, "MUSINFO"))) || !strnicmp(full, "music/", 6)) tag("ownmusic");
@@ -876,6 +878,7 @@ static FString FitPack(const DoomVRMyWad& my)
 {
 	static const struct { const char* tag; const char* pack; } kFits[] = {
 		{ "fit:doominfinite", "doomvr-weapons-doominfinite-b.pk3" },
+		{ "fit:myhouse", "doomvr-weapons-myhouse-b.pk3" },
 	};
 	for (auto& f : kFits)
 	{
@@ -931,6 +934,37 @@ CCMD(vr_switchgame)
 			}
 			args.Push(launch[i]);
 			shown.AppendFormat(" %s", launch[i].GetChars());
+		}
+		// A game whose own guns take the Doom ones' places (MyHouse, MeatGrinder,
+		// the Brutal family) gets our Doom guns and its pack naming its weapons,
+		// when its launcher has neither: a Build Your Own Game launcher made
+		// before setup wrote them into the catalogue showed the flat guns.
+		{
+			static const struct { const char* file; const char* pack; } kGunFits[] = {
+				{ "myhouse.pk3", "doomvr-weapons-myhouse-b.pk3" },
+				{ "meatgrinderV2C.pk3", "doomvr-weapons-meatgrinder-b.pk3" },
+				{ "brutalv21.pk3", "doomvr-weapons-brutaldoom-b.pk3" },
+				{ "PB-0_3_1-alpha.pk3", "doomvr-weapons-projectbrutality-b.pk3" },
+				{ "bd64gamev2.pk3", "doomvr-weapons-brutaldoom64-b.pk3" },
+			};
+			auto loads = [&](const char* name) {
+				for (auto& a : args) if (ExtractFileBase(a.GetChars(), true).CompareNoCase(name) == 0) return true;
+				return false;
+			};
+			for (auto& f : kGunFits)
+			{
+				if (!loads(f.file) || loads(f.pack)) continue;
+				FString guns = progdir + "mods/doomvr-weapons-doom-b.pk3", pack = progdir + "mods/" + f.pack;
+				if (!FileExists(guns) || !FileExists(pack)) continue;
+				// Before a launcher's empty trailing -file (its %*).
+				const bool tail = args.Size() > 0 && args.Last().CompareNoCase("-file") == 0;
+				if (tail) args.Pop();
+				if (!loads("doomvr-weapons-doom-b.pk3")) { args.Push("-modern"); args.Push(guns); shown.AppendFormat(" -modern %s", guns.GetChars()); }
+				args.Push("-modern"); args.Push(pack); shown.AppendFormat(" -modern %s", pack.GetChars());
+				if (tail) args.Push("-file");
+				Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: %s gets Game Or Die's 3D guns (%s)\n", f.file, f.pack);
+				break;
+			}
 		}
 		if (my != nullptr)
 		{

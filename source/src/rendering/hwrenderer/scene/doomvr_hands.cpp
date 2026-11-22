@@ -1789,7 +1789,17 @@ int DoomVR_WheelGather()
 				}
 				return id;
 			};
-			if (const AActor* def = GetDefaultByType(cls)) g.icon = pictureOf(def->SpawnState);
+			// A fist (MyHouse's SmoothFist too) shows Doom's own fist picture: always a hand.
+			if (HandWeapon(inv) == 1)
+			{
+				const int pung = GetSpriteIndex("PUNG", false);
+				if (pung >= 0 && unsigned(pung) < sprites.Size() && sprites[pung].numframes > 0)
+				{
+					bool mirror;
+					g.icon = sprites[pung].GetSpriteFrame(0, 0, nullAngle, &mirror);
+				}
+			}
+			if (!g.icon.isValid()) if (const AActor* def = GetDefaultByType(cls)) g.icon = pictureOf(def->SpawnState);
 			if (!g.icon.isValid()) g.icon = pictureOf(g.ready);
 			AActor* ready = pl->ReadyWeapon;
 			g.current = ready && (ready == inv || ready->PointerVar<AActor>(NAME_SisterWeapon) == inv);
