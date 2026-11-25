@@ -1711,7 +1711,18 @@ namespace
 
 	void ReadControllers()
 	{
-		if (!gBindsChecked) { gBindsChecked = true; VRDefaultBinds(); FrameDefaultBinds(); }
+		if (!gBindsChecked)
+		{
+			gBindsChecked = true;
+			VRDefaultBinds();
+			FrameDefaultBinds();
+			// The menu never depends on a settings file: a menu button with nothing
+			// on it opens the menu, whatever else the game has bound.
+			for (int k : { int(KEY_VR_MENU), int(KEY_VRF_MENU) })
+				if (Bindings.GetBinding(k).IsEmpty()) { Bindings.SetBind(k, "menu_main"); Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: menu button had nothing on it: menu\n"); }
+			// What this game was given, for logs and the fresh-install check (tools\fresh-install-check.ps1).
+			Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: VR buttons for this game: menu = %s, A = %s, Frame menu = %s\n", Bindings.GetBinding(KEY_VR_MENU).GetChars(), Bindings.GetBinding(KEY_VR_A).GetChars(), Bindings.GetBinding(KEY_VRF_MENU).GetChars());
+		}
 		// SteamVR on a Steam Frame keeps the View and Menu buttons for itself most of the
 		// time: the press never reaches us and the session drops from FOCUSED to VISIBLE.
 		// Losing the focus during play opens our menu (as the Quest's Meta button pauses a
@@ -2257,6 +2268,8 @@ void DoomVR_BeginFrame()
 		gSwitchRestarted = false;
 		Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: switched games in this process in %.1f s, the headset up throughout\n", (NowMs() - gSwitchStartMs) / 1000.0);
 		gSwitchStartMs = 0;
+		void DoomVR_TestChainStart();	// doomvr_switchgame.cpp: a desk test chain goes on in the next game (inert unless set)
+		DoomVR_TestChainStart();
 	}
 
 	// The synthetic yaw goes through the layer, so the eye poses turn with the
@@ -4516,4 +4529,17 @@ CCMD(vr_recenter) { Printf("vr_recenter: built without pcvr-xr\n"); }
 void DoomVR_LevelStarted() {}
 CCMD(vr_report) { Printf("vr_report: built without pcvr-xr\n"); }
 
+#endif
+
+// A game's bindings were (re)loaded (gameconfigfile.cpp DoKeySetup): its VR and
+// Steam Frame defaults are put in again when it has none. Switch Game runs a
+// game in this process, and Heretic or Hexen played for the first time after
+// Doom had no VR buttons at all (no menu, no use; Flat2VR report 25 Nov 2026).
+#ifdef DOOMVR_PCVRXR
+void DoomVR_BindsLoaded()
+{
+	gBindsChecked = false;
+}
+#else
+void DoomVR_BindsLoaded() {}
 #endif

@@ -811,6 +811,8 @@ void FGameConfigFile::DoGameSetup(FString section)
 }
 
 // Moved from DoGameSetup so that it can happen after wads are loaded
+void DoomVR_BindsLoaded();	// doomvr_headset.cpp
+
 void FGameConfigFile::DoKeySetup(FString section)
 {
 	assert(bGameSetup);
@@ -873,6 +875,9 @@ void FGameConfigFile::DoKeySetup(FString section)
 		Bindings.DefaultBind("F11", "bumplight");
 	}
 
+	// DoomVR: this game's bindings are loaded: its VR controller defaults are
+	// checked again (a game switched to in this process for the first time had none).
+	DoomVR_BindsLoaded();
 	bKeySetup = true;
 }
 
