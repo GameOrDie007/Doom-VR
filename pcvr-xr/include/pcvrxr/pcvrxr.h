@@ -132,6 +132,18 @@ struct Config {
     // diagnostic, for a runtime that ever does show them upside down. Only
     // where the eyes are copied in (the Frame).
     int flipEyes = -1;
+    // How hard the layer waits for an eye's drawing before it hands the image
+    // to the runtime. A flush only asks the GL to send its commands, and a GL
+    // that works on a thread of its own (Zink on the Steam Frame, under
+    // Lepton) may not have sent them by the time the frame is submitted: the
+    // compositor then shows the last eye drawn a frame or more late, under
+    // this frame's head pose - the left eye steady, the right one jumping as
+    // the head moves, on some starts and not others.
+    //   -1  the layer decides: 1 on the Steam Frame standalone, 0 elsewhere
+    //    0  flush only (a Quest's and a PC's runtimes do their own waiting)
+    //    1  wait for the GPU on the last eye and on the panel
+    //    2  wait for the GPU on every eye and on the panel
+    int eyeSync = -1;
     // Extra OpenXR extensions this port wants. They are enumerated first and
     // only the ones the runtime actually has are requested, because ONE
     // unknown name fails xrCreateInstance outright and takes all of VR with

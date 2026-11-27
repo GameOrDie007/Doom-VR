@@ -787,6 +787,20 @@ bool Session::BringUp(const Config& cfg) {
     }
 #endif
 
+    // How the eyes are handed over (Config::eyeSync). The Steam Frame
+    // standalone waits for the GPU on the last eye and the panel unless the
+    // port says otherwise; everything else flushes, as it always has.
+    m->eyeSync = cfg.eyeSync < 0 ? 0 : (cfg.eyeSync > 2 ? 2 : cfg.eyeSync);
+#ifdef __ANDROID__
+    if (m->haveFrameControllers && cfg.eyeSync < 0) m->eyeSync = 1;
+#endif
+    if (m->eyeSync != 0 || m->haveFrameControllers)
+        m->Log("pcvr-xr: eye hand-over: %s%s",
+               m->eyeSync == 2 ? "waits for the GPU on every eye and the panel"
+             : m->eyeSync == 1 ? "waits for the GPU on the last eye and the panel"
+             : "flush only",
+               cfg.eyeSync < 0 ? "" : " (the port's choice)");
+
 #ifdef PCVRXR_D3D11
     if (m->IsD3D()) {
         m->d3dDevice = (ID3D11Device*)cfg.d3d11Device;
@@ -1283,12 +1297,16 @@ void Session::EndEye(int eye) {
     // drew nothing" and sends you looking in entirely the wrong place.
     if (m->dumpRequested) m->DumpEye(eye);
 
-    // Send this eye's drawing to the GPU before the image is handed over.
-    // A GL that batches commands (Zink on the Steam Frame, under Lepton) can
-    // otherwise still be holding the last eye's work when the frame is
-    // submitted, and the compositor shows that eye a frame late: one eye
-    // steady, the other lagging and jumping. A flush is nearly free.
-    glFlush();
+    // This eye's drawing has to be on the GPU - and, for the last eye, done -
+    // before the image is handed over. A GL that batches commands and sends
+    // them from a thread of its own (Zink on the Steam Frame, under Lepton)
+    // can otherwise still be holding the last eye's work when the frame is
+    // submitted, and the compositor shows that eye a frame late under this
+    // frame's pose: one eye steady, the other lagging and jumping. A flush
+    // alone did not cure it there - it asks, it does not wait - so the last
+    // eye waits (Config::eyeSync). The first eye has the whole of the second
+    // eye's drawing behind it, and the last eye's wait covers it too.
+    m->SyncBeforeRelease(m->eyeSync == 2 || (m->eyeSync == 1 && eye == m->eyeCount - 1));
 
     XrSwapchainImageReleaseInfo ri{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
     xrReleaseSwapchainImage(e.swapchain, &ri);
