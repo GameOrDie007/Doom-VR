@@ -300,6 +300,13 @@ struct Session::Impl {
     std::string runtimeName;
     uint64_t runtimeVersion = 0;
     bool flipEyes = false;      // the eye copy turns the picture over (Config::flipEyes)
+    int eyeSync = 0;            // 0 flush, 1 finish the last eye and the panel, 2 finish every eye (Config::eyeSync)
+    // The hand-over of a finished image: its drawing sent, and waited for
+    // where eyeSync asks. Called just before xrReleaseSwapchainImage.
+    void SyncBeforeRelease(bool wait) {
+        if (wait) glFinish();
+        else glFlush();
+    }
     std::string failure;
 
     float debugYaw = 0.0f;

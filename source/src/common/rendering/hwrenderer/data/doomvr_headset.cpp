@@ -44,6 +44,7 @@ EXTERN_CVAR(Float, vr_hunits_per_meter)
 // these there is no way to ask "does the view follow the head, and which way"
 // from a desk. Not archived: a test value must not survive into a play session.
 CVAR(Int, vr_eye_flip, 0, 0)	// Steam Frame diagnostic: 1 turns the eye pictures over on their way to the runtime
+CVAR(Int, vr_eye_sync, -1, 0)	// how the eyes are handed to the runtime: -1 the layer decides (the Steam Frame waits for the GPU on the last eye), 0 flush only, 1 wait on the last eye, 2 wait on every eye
 CVAR(Float, vr_debug_yaw, 0.f, 0)
 CVAR(Float, vr_debug_pitch, 0.f, 0)
 CVAR(Float, vr_debug_roll, 0.f, 0)
@@ -783,6 +784,9 @@ namespace
 			// The eyes go as drawn (the Frame's panels show what the swapchain holds);
 			// +vr_eye_flip 1 turns them over, for a desk check only.
 			cfg.flipEyes = vr_eye_flip;
+			// The last eye is waited for on the Frame (one eye a frame late and
+			// jumping otherwise); +vr_eye_sync 0, 1 or 2 overrides it.
+			cfg.eyeSync = vr_eye_sync;
 			if (quest2) Printf(PrintFlag(PRINT_HIGH | PRINT_NONOTIFY), "DoomVR: a Quest 2 - no compositor supersampling, so it holds 90 Hz\n");
 		}
 #endif
